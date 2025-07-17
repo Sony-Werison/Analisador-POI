@@ -1,0 +1,1034 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analisador Avançado de POIs com Mapa</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Leaflet.js para o mapa -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    
+    <!-- Leaflet.markercluster para agrupar marcadores -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+
+    <!-- SheetJS (xlsx) para ler arquivos Excel -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+    <!-- Fontes do Google -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        #map {
+            height: calc(100vh - 150px); /* Altura dinâmica */
+            min-height: 600px;
+            width: 100%;
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+        }
+        .loader {
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #3498db;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .group-card, .metric-value, .lang-flag {
+            cursor: pointer;
+            transition: all 0.2s ease-in-out;
+        }
+        .group-card:hover {
+            background-color: #f9fafb; /* gray-50 */
+        }
+        .metric-value:hover {
+            text-decoration: underline;
+        }
+        .lang-flag:hover {
+            transform: scale(1.1);
+        }
+        .lang-flag.active {
+            box-shadow: 0 0 0 2px #3b82f6; /* Anel azul para a bandeira ativa */
+        }
+        details > summary {
+            list-style: none;
+        }
+        details > summary::-webkit-details-marker {
+            display: none;
+        }
+        /* Estilos para a tabela de resultados */
+        .results-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 0.5rem;
+        }
+        .results-table th, .results-table td {
+            border: 1px solid #e5e7eb;
+            padding: 0.5rem;
+            text-align: left;
+            font-size: 0.875rem;
+        }
+        .results-table th {
+            background-color: #f9fafb;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans p-4 md:p-8">
+
+    <div class="max-w-screen-2xl mx-auto">
+        <header class="text-center mb-8">
+            <h1 class="text-3xl md:text-4xl font-bold text-gray-800" data-lang="main_title">Analisador Avançado de Pontos de Interesse (POIs)</h1>
+            <p class="text-gray-600 mt-2" data-lang="main_subtitle">Carregue um arquivo para validar, analisar sobreposições e visualizar POIs num mapa interativo.</p>
+        </header>
+
+        <main class="grid grid-cols-1 lg:grid-cols-3 xl:grid-cols-4 gap-8">
+            <!-- Coluna de Controlo e Resultados -->
+            <div class="lg:col-span-1 xl:col-span-1 bg-white p-6 rounded-lg shadow-lg h-fit max-h-[calc(100vh-100px)] overflow-y-auto">
+                <!-- Controles -->
+                <div class="border-b pb-6">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-2xl font-semibold text-gray-700" data-lang="control_title">Controle</h2>
+                        <div class="flex space-x-2 items-center">
+                            <!-- Bandeiras SVG embutidas -->
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 700" class="lang-flag h-6 w-8 rounded-sm active" data-lang-code="pt" title="Português">
+                                <rect width="1000" height="700" fill="#009c3b"/>
+                                <path d="M500 80L920 350 500 620 80 350z" fill="#ffdf00"/>
+                                <circle cx="500" cy="350" r="175" fill="#002776"/>
+                            </svg>
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 750 500" class="lang-flag h-6 w-8 rounded-sm" data-lang-code="es" title="Español">
+                                <rect width="750" height="500" fill="#c60b1e"/>
+                                <rect y="125" width="750" height="250" fill="#ffc400"/>
+                            </svg>
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 30" class="lang-flag h-6 w-8 rounded-sm" data-lang-code="en" title="English">
+                                <clipPath id="uk-a"><path d="M0 0v30h60V0z"/></clipPath>
+                                <path d="M0 0v30h60V0z" fill="#012169"/>
+                                <g clip-path="url(#uk-a)">
+                                    <path d="M0 0l60 30m0-30L0 30" stroke="#fff" stroke-width="6"/>
+                                    <path d="M0 0l60 30m0-30L0 30" stroke="#C8102E" stroke-width="4"/>
+                                    <path d="M30 0v30M0 15h60" stroke="#fff" stroke-width="10"/>
+                                    <path d="M30 0v30M0 15h60" stroke="#C8102E" stroke-width="6"/>
+                                </g>
+                            </svg>
+                        </div>
+                    </div>
+                    <div>
+                        <label for="file-input" class="block text-sm font-medium text-gray-700 mb-2" data-lang="select_file">1. Selecione o arquivo (.xlsx, .csv)</label>
+                        <input type="file" id="file-input" accept=".csv, .xlsx" class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 transition-colors duration-200 cursor-pointer">
+                        <span id="file-name-display" class="block mt-2 text-sm text-gray-600"></span>
+                    </div>
+                    <div id="exclusion-column-section" class="mt-4 hidden">
+                         <label for="exclusion-column-select" class="block text-sm font-medium text-gray-700 mb-2" data-lang="tie_breaker_column">2. Coluna para desempate (opcional)</label>
+                         <select id="exclusion-column-select" class="block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm">
+                             <option value="" data-lang="none_option">Nenhuma</option>
+                         </select>
+                    </div>
+                    <div class="mt-6 flex flex-col sm:flex-row gap-4">
+                        <button id="quick-process-btn" class="w-full sm:w-auto bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2 disabled:opacity-50" disabled data-lang="analyze_button_quick">Análise Rápida</button>
+                        <button id="full-process-btn" class="w-full sm:w-auto bg-indigo-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-indigo-700 flex items-center justify-center gap-2 disabled:opacity-50" disabled data-lang="analyze_button_full">Análise Completa</button>
+                        <button id="clear-btn" class="w-full sm:w-auto bg-gray-200 text-gray-700 font-semibold py-2 px-4 rounded-lg hover:bg-gray-300 ml-auto" data-lang="clear_button">Limpar</button>
+                    </div>
+                </div>
+
+                <!-- Loader e Mensagens -->
+                <div id="loader-container" class="hidden flex-col justify-center items-center my-6">
+                    <div class="flex items-center">
+                        <div class="loader"></div>
+                        <p id="loader-text" class="ml-4 text-gray-600" data-lang="processing_message">A processar os dados...</p>
+                    </div>
+                    <button id="cancel-geocoding-btn" class="hidden mt-4 bg-red-500 text-white font-semibold py-1 px-3 rounded-lg hover:bg-red-600 text-sm" data-lang="cancel_geocoding_button">Cancelar</button>
+                </div>
+                <div id="message-area" class="mt-4"></div>
+
+                <!-- Resultados -->
+                <div id="results-section" class="mt-4">
+                    <div id="summary-section" class="hidden"></div>
+                    <div id="results-header" class="hidden items-center justify-between mb-4 mt-6 flex-wrap gap-4">
+                         <h3 class="text-xl font-bold text-gray-800" data-lang="downloads_title">Downloads</h3>
+                         <div class="grid grid-cols-2 gap-2 w-full">
+                             <button id="download-clean-xlsx-btn" class="bg-green-700 text-white font-semibold py-2 px-3 rounded-lg hover:bg-green-800 text-xs" data-lang="download_clean_button">Base Limpa (XLSX)</button>
+                             <button id="download-problematic-xlsx-btn" class="bg-red-700 text-white font-semibold py-2 px-3 rounded-lg hover:bg-red-800 text-xs" data-lang="download_problems_button">Problemas (XLSX)</button>
+                         </div>
+                    </div>
+                    <div id="results-output" class="space-y-3 mt-4"></div>
+                </div>
+            </div>
+
+            <!-- Coluna do Mapa -->
+            <div class="lg:col-span-2 xl:col-span-3 bg-white p-6 rounded-lg shadow-lg">
+                 <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-2xl font-semibold text-gray-700" data-lang="map_title">Visualização no Mapa</h2>
+                    <button id="show-all-btn" class="hidden bg-blue-100 text-blue-700 font-semibold py-1 px-3 rounded-lg hover:bg-blue-200 text-sm" data-lang="show_all_button">Mostrar Todos</button>
+                 </div>
+                 <div id="map-container">
+                    <div id="map"></div>
+                 </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // --- ELEMENTOS DA UI ---
+        const fileInput = document.getElementById('file-input');
+        const fileNameDisplay = document.getElementById('file-name-display');
+        const quickProcessBtn = document.getElementById('quick-process-btn');
+        const fullProcessBtn = document.getElementById('full-process-btn');
+        const clearBtn = document.getElementById('clear-btn');
+        const exclusionColumnSelect = document.getElementById('exclusion-column-select');
+        const loader = document.getElementById('loader-container');
+        const loaderText = document.getElementById('loader-text');
+        const cancelGeocodingBtn = document.getElementById('cancel-geocoding-btn');
+        const messageArea = document.getElementById('message-area');
+        const summarySection = document.getElementById('summary-section');
+        const resultsHeader = document.getElementById('results-header');
+        const resultsOutput = document.getElementById('results-output');
+        const downloadProblematicXlsxBtn = document.getElementById('download-problematic-xlsx-btn');
+        const downloadCleanXlsxBtn = document.getElementById('download-clean-xlsx-btn');
+        const showAllBtn = document.getElementById('show-all-btn');
+
+        // --- ESTADO DA APLICAÇÃO ---
+        let originalData = { headers: [], rows: [], rawRows: [] };
+        let allProblematicPoints = [];
+        let cleanPointsForExport = [];
+        let proximityGroups = [];
+        let exactDuplicateGroups = [];
+        let stateMismatches = [];
+        let cityMismatches = [];
+        let allPointsForMap = [];
+        let map = null;
+        let markerClusterGroup = null;
+        let currentFeatureGroup = null;
+        let isGeocodingCancelled = false;
+        let currentLang = 'pt';
+
+        // --- ÍCONES DO MAPA ---
+        const createIcon = (color) => new L.Icon({
+            iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-${color}.png`,
+            shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+            iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
+        });
+        const icons = {
+            clean: createIcon('blue'),
+            duplicate: createIcon('red'),
+            proximity: createIcon('yellow'),
+            invalid: createIcon('black'),
+            location: createIcon('violet')
+        };
+
+        // --- TRADUÇÕES E MAPAS ---
+        const stateMap = {
+            'AC': 'Acre', 'AL': 'Alagoas', 'AP': 'Amapá', 'AM': 'Amazonas', 'BA': 'Bahia',
+            'CE': 'Ceará', 'DF': 'Distrito Federal', 'ES': 'Espírito Santo', 'GO': 'Goiás',
+            'MA': 'Maranhão', 'MT': 'Mato Grosso', 'MS': 'Mato Grosso do Sul', 'MG': 'Minas Gerais',
+            'PA': 'Pará', 'PB': 'Paraíba', 'PR': 'Paraná', 'PE': 'Pernambuco', 'PI': 'Piauí',
+            'RJ': 'Rio de Janeiro', 'RN': 'Rio Grande do Norte', 'RS': 'Rio Grande do Sul',
+            'RO': 'Rondônia', 'RR': 'Roraima', 'SC': 'Santa Catarina', 'SP': 'São Paulo',
+            'SE': 'Sergipe', 'TO': 'Tocantins'
+        };
+        const translations = {
+            pt: {
+                main_title: "Analisador Avançado de Pontos de Interesse (POIs)",
+                main_subtitle: "Carregue um arquivo para validar, analisar sobreposições e visualizar POIs num mapa interativo.",
+                control_title: "Controle",
+                select_file: "1. Selecione o arquivo (.xlsx, .csv)",
+                tie_breaker_column: "2. Coluna para desempate (opcional)",
+                none_option: "Nenhuma",
+                analyze_button_quick: "Análise Rápida",
+                analyze_button_full: "Análise Completa",
+                clear_button: "Limpar",
+                processing_message: "A processar os dados...",
+                geocoding_message: (current, total) => `Geocodificando: ${current} / ${total}`,
+                cancel_geocoding_button: "Cancelar",
+                downloads_title: "Downloads",
+                download_clean_button: "Base Limpa (XLSX)",
+                download_problems_button: "Problemas (XLSX)",
+                map_title: "Visualização no Mapa",
+                show_all_button: "Mostrar Todos",
+                summary_title: "Métricas de Validação",
+                total_pois_label: "Total de POIs analisados:",
+                exact_overlap_label: "POIs em sobreposição exata:",
+                proximity_label: "Pontos em Proximidade:",
+                removed_points_label: "Pontos removidos da base:",
+                clean_points_label: "Pontos na base limpa:",
+                state_mismatch_label: "POIs com Estado incorreto:",
+                city_mismatch_label: "POIs com Cidade incorreta:",
+                error_full_analysis_cols: "Para a Análise Completa, o arquivo deve conter colunas de localização (Estado/UF e Cidade/Município).",
+                results_title_proximity: "Células de 1m² com Pontos em Proximidade",
+                results_title_exact: "Grupos de Sobreposição Exata",
+                results_title_mismatch: "Inconsistências de Localização",
+                mismatch_state_header: "Estado Incorreto",
+                mismatch_city_header: "Cidade Incorreta",
+                group_card_header: (count) => `Grupos com ${count} pontos`,
+                group_card_count: (count) => `${count} grupo(s)`,
+                group_card_points_in_cell: (count) => `${count} pontos na mesma célula`,
+                map_popup_row: "Linha",
+                map_popup_status: "Status",
+                map_popup_status_clean: "Ponto Válido",
+                error_reading_file: "Erro ao ler o arquivo:",
+                error_no_data: "Nenhum dado para processar.",
+                error_generic: "Ocorreu um erro na análise:",
+                success_no_problems: "Análise concluída. Nenhum problema encontrado.",
+                download_no_data: "Não há dados para baixar."
+            },
+            en: {
+                main_title: "Advanced Point of Interest (POI) Analyzer",
+                main_subtitle: "Upload a file to validate, analyze overlaps, and visualize POIs on an interactive map.",
+                control_title: "Control",
+                select_file: "1. Select the file (.xlsx, .csv)",
+                tie_breaker_column: "2. Tie-breaker column (optional)",
+                none_option: "None",
+                analyze_button_quick: "Quick Analysis",
+                analyze_button_full: "Full Analysis",
+                clear_button: "Clear",
+                processing_message: "Processing data...",
+                geocoding_message: (current, total) => `Geocoding: ${current} / ${total}`,
+                cancel_geocoding_button: "Cancel",
+                downloads_title: "Downloads",
+                download_clean_button: "Clean Base (XLSX)",
+                download_problems_button: "Problems (XLSX)",
+                map_title: "Map Visualization",
+                show_all_button: "Show All",
+                summary_title: "Validation Metrics",
+                total_pois_label: "Total POIs analyzed:",
+                exact_overlap_label: "POIs in exact overlap:",
+                proximity_label: "Points in Proximity:",
+                removed_points_label: "Points removed from base:",
+                clean_points_label: "Points in clean base:",
+                state_mismatch_label: "POIs with incorrect State:",
+                city_mismatch_label: "POIs with incorrect City:",
+                error_full_analysis_cols: "For Full Analysis, the file must contain location columns (State/UF and City/Município).",
+                results_title_proximity: "1m² Cells with Proximity Points",
+                results_title_exact: "Exact Overlap Groups",
+                results_title_mismatch: "Location Mismatches",
+                mismatch_state_header: "Incorrect State",
+                mismatch_city_header: "Incorrect City",
+                group_card_header: (count) => `Groups with ${count} points`,
+                group_card_count: (count) => `${count} group(s)`,
+                group_card_points_in_cell: (count) => `${count} points in the same cell`,
+                map_popup_row: "Row",
+                map_popup_status: "Status",
+                map_popup_status_clean: "Valid Point",
+                error_reading_file: "Error reading file:",
+                error_no_data: "No data to process.",
+                error_generic: "An error occurred during analysis:",
+                success_no_problems: "Analysis complete. No issues found.",
+                download_no_data: "No data to download."
+            },
+            es: {
+                main_title: "Analizador Avanzado de Puntos de Interés (POI)",
+                main_subtitle: "Cargue un archivo para validar, analizar superposiciones y visualizar POI en un mapa interactivo.",
+                control_title: "Control",
+                select_file: "1. Seleccione el archivo (.xlsx, .csv)",
+                tie_breaker_column: "2. Columna de desempate (opcional)",
+                none_option: "Ninguna",
+                analyze_button_quick: "Análisis Rápido",
+                analyze_button_full: "Análisis Completo",
+                clear_button: "Limpiar",
+                processing_message: "Procesando datos...",
+                geocoding_message: (current, total) => `Geocodificando: ${current} / ${total}`,
+                cancel_geocoding_button: "Cancelar",
+                downloads_title: "Descargas",
+                download_clean_button: "Base Limpia (XLSX)",
+                download_problems_button: "Problemas (XLSX)",
+                map_title: "Visualización en Mapa",
+                show_all_button: "Mostrar Todos",
+                summary_title: "Métricas de Validación",
+                total_pois_label: "Total de POI analizados:",
+                exact_overlap_label: "POI en superposición exacta:",
+                proximity_label: "Puntos en Proximidad:",
+                removed_points_label: "Puntos eliminados de la base:",
+                clean_points_label: "Puntos en la base limpia:",
+                state_mismatch_label: "POI con Estado incorrecto:",
+                city_mismatch_label: "POI con Ciudad incorrecta:",
+                error_full_analysis_cols: "Para el Análisis Completo, el archivo debe contener columnas de ubicación (Estado/UF y Ciudad/Municipio).",
+                results_title_proximity: "Celdas de 1m² con Puntos en Proximidad",
+                results_title_exact: "Grupos de Superposición Exacta",
+                results_title_mismatch: "Inconsistencias de Ubicación",
+                mismatch_state_header: "Estado Incorrecto",
+                mismatch_city_header: "Ciudad Incorrecta",
+                group_card_header: (count) => `Grupos con ${count} puntos`,
+                group_card_count: (count) => `${count} grupo(s)`,
+                group_card_points_in_cell: (count) => `${count} puntos en la misma celda`,
+                map_popup_row: "Fila",
+                map_popup_status: "Estado",
+                map_popup_status_clean: "Punto Válido",
+                error_reading_file: "Error al leer el archivo:",
+                error_no_data: "No hay datos para procesar.",
+                error_generic: "Ocurrió un error durante el análisis:",
+                success_no_problems: "Análisis completo. No se encontraron problemas.",
+                download_no_data: "No hay datos para descargar."
+            }
+        };
+
+        // --- EVENT LISTENERS ---
+        fileInput.addEventListener('change', handleFileSelection);
+        quickProcessBtn.addEventListener('click', () => handleFileProcessing(false));
+        fullProcessBtn.addEventListener('click', () => handleFileProcessing(true));
+        clearBtn.addEventListener('click', clearAll);
+        cancelGeocodingBtn.addEventListener('click', () => { isGeocodingCancelled = true; });
+        downloadProblematicXlsxBtn.addEventListener('click', () => downloadXLSX(allProblematicPoints, 'coordenadas_problematicas.xlsx'));
+        downloadCleanXlsxBtn.addEventListener('click', () => downloadXLSX(cleanPointsForExport, 'base_limpa.xlsx'));
+        showAllBtn.addEventListener('click', () => {
+            if (allPointsForMap.length > 0) {
+                displayPointsOnMap(allPointsForMap, true);
+            }
+        });
+        document.querySelectorAll('.lang-flag').forEach(flag => {
+            flag.addEventListener('click', (e) => setLanguage(e.currentTarget.dataset.langCode));
+        });
+        
+        // --- FUNÇÕES DE INICIALIZAÇÃO ---
+        function initializeMap() {
+            if (map) map.remove();
+            map = L.map('map').setView([-14.235, -51.925], 4);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            }).addTo(map);
+            markerClusterGroup = L.markerClusterGroup();
+            map.addLayer(markerClusterGroup);
+        }
+
+        window.onload = initializeMap;
+
+        // --- FUNÇÕES PRINCIPAIS DE CONTROLO ---
+        async function handleFileSelection() {
+            clearAnalysisResults(); 
+            if (!fileInput.files.length) {
+                fileNameDisplay.textContent = '';
+                quickProcessBtn.disabled = true;
+                fullProcessBtn.disabled = true;
+                return;
+            }
+            
+            const file = fileInput.files[0];
+            fileNameDisplay.textContent = file.name;
+            loader.classList.remove('hidden');
+
+            try {
+                originalData = await parseFile(file);
+                populateExclusionDropdown(originalData.headers);
+                quickProcessBtn.disabled = false;
+                fullProcessBtn.disabled = false;
+            } catch (error) {
+                showMessage(translations[currentLang].error_reading_file + ' ' + error.message);
+                clearAll();
+            } finally {
+                loader.classList.add('hidden');
+            }
+        }
+
+        async function handleFileProcessing(isFullAnalysis) {
+            clearAnalysisResults();
+            if (originalData.rows.length === 0) {
+                showMessage(translations[currentLang].error_no_data);
+                return;
+            }
+            loader.classList.remove('hidden');
+            if(isFullAnalysis) {
+                cancelGeocodingBtn.classList.remove('hidden');
+            }
+            
+            setTimeout(async () => {
+                try {
+                    await processAndDisplayData(isFullAnalysis);
+                } catch (error) {
+                    showMessage(translations[currentLang].error_generic + ' ' + error.message);
+                } finally {
+                    loader.classList.add('hidden');
+                    cancelGeocodingBtn.classList.add('hidden');
+                }
+            }, 50);
+        }
+        
+        // --- LÓGICA DE PROCESSAMENTO DE DADOS ---
+        
+        function roundHalfToEven(value) {
+            const floor = Math.floor(value);
+            const decimal = value - floor;
+            if (decimal !== 0.5) {
+                return Math.round(value);
+            }
+            if (floor % 2 === 0) {
+                return floor;
+            }
+            return Math.ceil(value);
+        }
+
+        async function processAndDisplayData(isFullAnalysis) {
+            isGeocodingCancelled = false;
+            const { rows, stateHeader, cityHeader } = originalData;
+            const exclusionColumn = exclusionColumnSelect.value;
+            
+            const validPoints = [];
+            const localIrregularPoints = [];
+            
+            for (const point of rows) {
+                if (point.latitude === null || point.longitude === null) {
+                    point.status = { type: 'invalid', reason: 'Coordenada Inválida/Ausente' };
+                    localIrregularPoints.push(point);
+                } else {
+                    validPoints.push(point);
+                }
+            }
+
+            if (isFullAnalysis) {
+                 if (!stateHeader || !cityHeader) {
+                    showMessage(translations[currentLang].error_full_analysis_cols);
+                    loader.classList.add('hidden');
+                    cancelGeocodingBtn.classList.add('hidden');
+                    return;
+                }
+                
+                loaderText.textContent = translations[currentLang].geocoding_message(0, validPoints.length);
+                let geocodedCount = 0;
+                for (const point of validPoints) {
+                    if (isGeocodingCancelled) break;
+                    const location = await getReverseGeocode(point.latitude, point.longitude);
+                    point.detectedState = location.state;
+                    point.detectedCity = location.city;
+                    
+                    const providedState = (point.data[stateHeader] || '').trim();
+                    const detectedState = (location.state || '').trim();
+                    point.stateMatch = providedState.toLowerCase() === detectedState.toLowerCase() ||
+                                       stateMap[providedState.toUpperCase()] === detectedState;
+
+                    point.cityMatch = (point.data[cityHeader] || '').trim().toLowerCase() === (location.city || '').trim().toLowerCase();
+                    geocodedCount++;
+                    loaderText.textContent = translations[currentLang].geocoding_message(geocodedCount, validPoints.length);
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+                loaderText.textContent = translations[currentLang].processing_message;
+            }
+
+            const meterSquareGroups = new Map();
+            const resolution = 0.00001;
+            validPoints.forEach(point => {
+                const latRounded = roundHalfToEven(point.latitude / resolution);
+                const lonRounded = roundHalfToEven(point.longitude / resolution);
+                const key = `${latRounded},${lonRounded}`;
+                if (!meterSquareGroups.has(key)) meterSquareGroups.set(key, []);
+                meterSquareGroups.get(key).push(point);
+            });
+
+            cleanPointsForExport = [];
+            proximityGroups = [];
+            exactDuplicateGroups = [];
+            stateMismatches = [];
+            cityMismatches = [];
+            allPointsForMap = [];
+            
+            meterSquareGroups.forEach(group => {
+                const subgroups = new Map();
+                group.forEach(p => {
+                    const key = exclusionColumn ? `${p.latitude},${p.longitude},${p.data[exclusionColumn]}` : `${p.latitude},${p.longitude}`;
+                    if (!subgroups.has(key)) subgroups.set(key, []);
+                    subgroups.get(key).push(p);
+                });
+
+                if (group.length === 1) {
+                    const point = group[0];
+                    if (isFullAnalysis) {
+                        if (!point.stateMatch) {
+                            point.status = { type: 'location', reason: 'Estado Incorreto' };
+                            stateMismatches.push(point);
+                        } else if (!point.cityMatch) {
+                            point.status = { type: 'location', reason: 'Cidade Incorreta' };
+                            cityMismatches.push(point);
+                        } else {
+                            point.status = { type: 'clean', reason: translations[currentLang].map_popup_status_clean };
+                            cleanPointsForExport.push(point);
+                        }
+                    } else {
+                        point.status = { type: 'clean', reason: translations[currentLang].map_popup_status_clean };
+                        cleanPointsForExport.push(point);
+                    }
+                    allPointsForMap.push(point);
+                } else {
+                    if (subgroups.size > 1) {
+                        proximityGroups.push(group);
+                    } else {
+                        exactDuplicateGroups.push(group);
+                    }
+                    
+                    subgroups.forEach(subgroup => {
+                        let isClean = true;
+                        if (isFullAnalysis) {
+                            for(const p of subgroup) {
+                                if (!p.stateMatch) {
+                                    p.status = { type: 'location', reason: 'Estado Incorreto' };
+                                    stateMismatches.push(p);
+                                    isClean = false;
+                                } else if (!p.cityMatch) {
+                                    p.status = { type: 'location', reason: 'Cidade Incorreta' };
+                                    cityMismatches.push(p);
+                                    isClean = false;
+                                }
+                            }
+                        }
+
+                        if(isClean) {
+                            const isProximity = subgroups.size > 1 && subgroup.length === 1;
+                            if (isProximity) {
+                                subgroup[0].status = { type: 'proximity', reason: 'Proximidade' };
+                            } else {
+                                subgroup[0].status = { type: 'duplicate', reason: `Duplicata (${subgroup.length - 1} extra)` };
+                                for (let i = 1; i < subgroup.length; i++) {
+                                    subgroup[i].status = { type: 'duplicate', reason: 'Duplicata exata' };
+                                }
+                            }
+                        }
+                        
+                        cleanPointsForExport.push(subgroup[0]); 
+                        allPointsForMap.push(...subgroup);
+                    });
+                }
+            });
+
+            allProblematicPoints = [...localIrregularPoints, ...proximityGroups.flat(), ...exactDuplicateGroups.flat(), ...stateMismatches, ...cityMismatches];
+            const metrics = calculateMetrics(allPointsForMap, isFullAnalysis);
+            displayResults(metrics, proximityGroups, exactDuplicateGroups, localIrregularPoints, stateMismatches, cityMismatches, isFullAnalysis);
+            updateMap(allPointsForMap);
+        }
+        
+        function calculateMetrics(points, isFullAnalysis) {
+            const poisInProximity = points.filter(p => p.status.type === 'proximity').length;
+            const poisInExactOverlap = points.filter(p => p.status.type === 'duplicate').length;
+            
+            let stateMismatchCount = 0, cityMismatchCount = 0;
+            if (isFullAnalysis) {
+                stateMismatchCount = points.filter(p => p.status.reason === 'Estado Incorreto').length;
+                cityMismatchCount = points.filter(p => p.status.reason === 'Cidade Incorreta').length;
+            }
+
+            return { poisInProximity, poisInExactOverlap, totalPois: originalData.rows.length, stateMismatches: stateMismatchCount, cityMismatches: cityMismatchCount };
+        }
+
+        // --- FUNÇÕES DE EXIBIÇÃO E UI ---
+        function displayResults(metrics, proxGroups, exactGroups, invalidPoints, stateMismatches, cityMismatches, isFullAnalysis) {
+            const pontosRemovidos = originalData.rows.length - cleanPointsForExport.length;
+            const pontosRestantes = cleanPointsForExport.length;
+
+            let fullAnalysisMetrics = '';
+            if (isFullAnalysis) {
+                fullAnalysisMetrics = `
+                    <div class="flex justify-between items-center">
+                        <span class="font-medium" data-lang="state_mismatch_label"></span>
+                        <span id="metric-state-mismatch" class="metric-value font-bold text-lg text-purple-600">${metrics.stateMismatches}</span>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="font-medium" data-lang="city_mismatch_label"></span>
+                        <span id="metric-city-mismatch" class="metric-value font-bold text-lg text-purple-600">${metrics.cityMismatches}</span>
+                    </div>
+                `;
+            }
+
+            summarySection.innerHTML = `
+                <h3 class="font-bold text-lg text-gray-800 mb-3" data-lang="summary_title"></h3>
+                <div class="space-y-3 text-gray-600 bg-blue-50 border border-blue-200 p-4 rounded-lg">
+                    <div class="flex justify-between items-center">
+                        <span class="font-medium" data-lang="total_pois_label"></span>
+                        <span id="metric-total" class="metric-value font-bold text-lg text-gray-800">${metrics.totalPois.toLocaleString('pt-BR')}</span>
+                    </div>
+                     <div class="flex justify-between items-center">
+                        <span class="font-medium" data-lang="proximity_label"></span>
+                        <span id="metric-proximity" class="metric-value font-bold text-lg text-yellow-500">${metrics.poisInProximity.toLocaleString('pt-BR')}</span>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="font-medium" data-lang="exact_overlap_label"></span>
+                        <span id="metric-overlap" class="metric-value font-bold text-lg text-red-600">${metrics.poisInExactOverlap.toLocaleString('pt-BR')}</span>
+                    </div>
+                    ${fullAnalysisMetrics}
+                    <div class="flex justify-between items-center pt-2 border-t mt-2">
+                        <span class="font-medium" data-lang="removed_points_label"></span>
+                        <span id="metric-removed" class="metric-value font-bold text-lg text-orange-500">${pontosRemovidos.toLocaleString('pt-BR')}</span>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="font-medium" data-lang="clean_points_label"></span>
+                        <span id="metric-clean" class="metric-value font-bold text-lg text-green-600">${pontosRestantes.toLocaleString('pt-BR')}</span>
+                    </div>
+                </div>`;
+            summarySection.classList.remove('hidden');
+
+            if (allProblematicPoints.length > 0) {
+                resultsHeader.classList.remove('hidden');
+                showAllBtn.classList.remove('hidden');
+                let resultsHtml = '';
+
+                if (isFullAnalysis && (stateMismatches.length > 0 || cityMismatches.length > 0)) {
+                     resultsHtml += `<h4 class="font-semibold text-md text-gray-700 mt-4 mb-2" data-lang="results_title_mismatch"></h4>`;
+                     resultsHtml += createMismatchSection(stateMismatches, cityMismatches);
+                }
+
+                if (exactGroups.length > 0) {
+                    resultsHtml += `<h4 class="font-semibold text-md text-gray-700 mt-4 mb-2" data-lang="results_title_exact"></h4>`;
+                    resultsHtml += createCollapsibleSection(exactGroups, 'exact');
+                }
+                if (proxGroups.length > 0) {
+                    resultsHtml += `<h4 class="font-semibold text-md text-gray-700 mt-4 mb-2" data-lang="results_title_proximity"></h4>`;
+                    resultsHtml += createCollapsibleSection(proxGroups, 'proximity');
+                }
+                
+                resultsOutput.innerHTML = resultsHtml;
+                document.querySelectorAll('.group-card').forEach(card => card.addEventListener('click', handleGroupCardClick));
+            } else {
+                showMessage(translations[currentLang].success_no_problems, 'success');
+            }
+            
+            addMetricListeners(stateMismatches, cityMismatches);
+            setLanguage(currentLang);
+        }
+
+        function createMismatchSection(stateMismatches, cityMismatches) {
+            let html = '';
+            if (stateMismatches.length > 0) {
+                html += `
+                    <details class="bg-gray-50 rounded-lg border mt-2">
+                        <summary class="p-3 font-semibold cursor-pointer flex justify-between items-center">
+                            <span data-lang="mismatch_state_header"></span>
+                            <span class="text-sm text-gray-500">${stateMismatches.length}</span>
+                        </summary>
+                        <div class="p-2 border-t">${createMismatchTable(stateMismatches, 'state')}</div>
+                    </details>
+                `;
+            }
+            if (cityMismatches.length > 0) {
+                 html += `
+                    <details class="bg-gray-50 rounded-lg border mt-2">
+                        <summary class="p-3 font-semibold cursor-pointer flex justify-between items-center">
+                            <span data-lang="mismatch_city_header"></span>
+                            <span class="text-sm text-gray-500">${cityMismatches.length}</span>
+                        </summary>
+                        <div class="p-2 border-t">${createMismatchTable(cityMismatches, 'city')}</div>
+                    </details>
+                `;
+            }
+            return html;
+        }
+
+        function createMismatchTable(mismatches, type) {
+            const { stateHeader, cityHeader } = originalData;
+            let table = '<table class="results-table"><thead><tr><th>Linha</th><th>Informado</th><th>Detectado</th></tr></thead><tbody>';
+            mismatches.forEach(p => {
+                const informed = type === 'state' ? p.data[stateHeader] : p.data[cityHeader];
+                const detected = type === 'state' ? p.detectedState : p.detectedCity;
+                table += `<tr><td>${p.row}</td><td>${informed || ''}</td><td>${detected || ''}</td></tr>`;
+            });
+            table += '</tbody></table>';
+            return table;
+        }
+        
+        function createCollapsibleSection(groups, type) {
+            const groupsByCount = groups.reduce((acc, group) => {
+                const count = group.length;
+                if (!acc[count]) acc[count] = [];
+                acc[count].push(group);
+                return acc;
+            }, {});
+
+            const sortedCounts = Object.keys(groupsByCount).sort((a, b) => b - a);
+            
+            let html = '';
+            sortedCounts.forEach(count => {
+                const currentGroups = groupsByCount[count];
+                html += `
+                    <details class="bg-gray-50 rounded-lg border mt-2">
+                        <summary class="p-3 font-semibold cursor-pointer flex justify-between items-center">
+                            <span data-lang-count-header="${count}"></span>
+                            <span class="text-sm text-gray-500" data-lang-count-groups="${currentGroups.length}"></span>
+                        </summary>
+                        <div class="p-2 border-t">
+                            ${currentGroups.map((group) => {
+                                const originalIndex = (type === 'proximity' ? proximityGroups : exactDuplicateGroups).findIndex(g => g === group);
+                                return createGroupResultCard(group, originalIndex, type);
+                            }).join('')}
+                        </div>
+                    </details>
+                `;
+            });
+            return html;
+        }
+
+        function createGroupResultCard(group, index, type) {
+            const pointsHtml = group.map(p => 
+                `<li class="flex justify-between items-center text-sm py-1"><span class="font-mono text-gray-700" data-lang="map_popup_row" data-row-number="${p.row}"></span><span class="text-xs text-gray-500">${p.latitude.toFixed(6)}, ${p.longitude.toFixed(6)}</span></li>`
+            ).join('');
+
+            return `
+                <div class="group-card bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden mt-2" data-group-index="${index}" data-group-type="${type}">
+                    <div class="p-3">
+                        <div class="flex justify-between items-center font-semibold text-sm">
+                            <span data-lang-points-in-cell="${group.length}"></span>
+                            <span class="text-xs font-mono text-blue-600" data-lang="view_on_map"></span>
+                        </div>
+                        <ul class="text-xs mt-2 border-t pt-2">${pointsHtml}</ul>
+                    </div>
+                </div>`;
+        }
+        
+        function addMetricListeners(stateMismatches, cityMismatches){
+            document.getElementById('metric-total')?.addEventListener('click', () => displayPointsOnMap(allPointsForMap, true));
+            document.getElementById('metric-proximity')?.addEventListener('click', () => displayPointsOnMap(allPointsForMap.filter(p => p.status.type === 'proximity'), true));
+            document.getElementById('metric-overlap')?.addEventListener('click', () => displayPointsOnMap(allPointsForMap.filter(p => p.status.type === 'duplicate'), true));
+            document.getElementById('metric-removed')?.addEventListener('click', () => {
+                 const cleanIds = new Set(cleanPointsForExport.map(p => p.row));
+                 const removedPoints = allPointsForMap.filter(p => !cleanIds.has(p.row));
+                 displayPointsOnMap(removedPoints, true);
+            });
+            document.getElementById('metric-clean')?.addEventListener('click', () => displayPointsOnMap(cleanPointsForExport, true));
+            document.getElementById('metric-state-mismatch')?.addEventListener('click', () => displayPointsOnMap(stateMismatches, true));
+            document.getElementById('metric-city-mismatch')?.addEventListener('click', () => displayPointsOnMap(cityMismatches, true));
+        }
+
+        function handleGroupCardClick(event) {
+            const card = event.currentTarget;
+            const groupIndex = parseInt(card.dataset.groupIndex, 10);
+            const groupType = card.dataset.groupType;
+            
+            const groupList = groupType === 'proximity' ? proximityGroups : exactDuplicateGroups;
+            const group = groupList[groupIndex];
+
+            if (group) {
+                displayPointsOnMap(group, false);
+            }
+        }
+
+        function displayPointsOnMap(points, cluster = true) {
+            if (currentFeatureGroup) {
+                map.removeLayer(currentFeatureGroup);
+                currentFeatureGroup = null;
+            }
+            markerClusterGroup.clearLayers();
+
+            if (!points || points.length === 0) return;
+
+            const markers = points.map(poi => {
+                if(poi.latitude === null || poi.longitude === null) return null;
+                const icon = icons[poi.status.type] || icons.duplicate;
+                const marker = L.marker([poi.latitude, poi.longitude], { icon: icon });
+                marker.bindPopup(`<b>${translations[currentLang].map_popup_row}:</b> ${poi.row}<br><b>Lat:</b> ${poi.latitude}<br><b>Lon:</b> ${poi.longitude}<br><b>${translations[currentLang].map_popup_status}:</b> ${poi.status.reason}`);
+                return marker;
+            }).filter(Boolean);
+
+            if (markers.length === 0) return;
+
+            const featureGroup = L.featureGroup(markers);
+
+            if (cluster) {
+                markerClusterGroup.addLayer(featureGroup);
+            } else {
+                currentFeatureGroup = featureGroup;
+                map.addLayer(currentFeatureGroup);
+            }
+            
+            map.fitBounds(featureGroup.getBounds(), { padding: [50, 50], maxZoom: 18 });
+        }
+
+        function updateMap(data) {
+            displayPointsOnMap(data, true);
+        }
+
+        // --- FUNÇÕES DE UI E UTILITÁRIOS ---
+        function setLanguage(lang) {
+            currentLang = lang;
+            if (document.documentElement.lang !== lang.split('-')[0]) {
+                document.documentElement.lang = lang.split('-')[0];
+            }
+            
+            document.querySelectorAll('[data-lang]').forEach(el => {
+                const key = el.dataset.lang;
+                if (translations[lang] && translations[lang][key]) {
+                    el.textContent = translations[lang][key];
+                }
+            });
+            document.querySelectorAll('[data-lang-count-header]').forEach(el => {
+                const count = el.dataset.langCountHeader;
+                if (translations[lang]) {
+                    el.textContent = translations[lang].group_card_header(count);
+                }
+            });
+            document.querySelectorAll('[data-lang-count-groups]').forEach(el => {
+                const count = el.dataset.langCountGroups;
+                 if (translations[lang]) {
+                    el.textContent = translations[lang].group_card_count(count);
+                }
+            });
+             document.querySelectorAll('[data-lang-points-in-cell]').forEach(el => {
+                const count = el.dataset.langPointsInCell;
+                 if (translations[lang]) {
+                    el.textContent = translations[lang].group_card_points_in_cell(count);
+                }
+            });
+             document.querySelectorAll('[data-lang="map_popup_row"]').forEach(el => {
+                const row = el.dataset.rowNumber;
+                 if (translations[lang]) {
+                    el.textContent = `${translations[lang].map_popup_row} ${row}`;
+                }
+            });
+
+            document.querySelectorAll('.lang-flag').forEach(flag => {
+                flag.classList.toggle('active', flag.dataset.langCode === lang);
+            });
+        }
+
+        async function getReverseGeocode(lat, lon) {
+            const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&accept-language=en`;
+            try {
+                const response = await fetch(url);
+                if (!response.ok) return { state: null, city: null };
+                const data = await response.json();
+                if (data.address) {
+                    return {
+                        state: data.address.state,
+                        city: data.address.city || data.address.town || data.address.village
+                    };
+                }
+                return { state: null, city: null };
+            } catch (error) {
+                console.error("Geocoding error:", error);
+                return { state: null, city: null };
+            }
+        }
+        
+        function showMessage(text, type = 'error') {
+            const colors = { error: 'red', success: 'green', info: 'blue' };
+            messageArea.innerHTML = `<div class="p-4 border-l-4 border-${colors[type]}-400 bg-${colors[type]}-100 text-${colors[type]}-700 rounded-md" role="alert"><p>${text}</p></div>`;
+        }
+        
+        function populateExclusionDropdown(headers) {
+            const select = document.getElementById('exclusion-column-select');
+            select.innerHTML = `<option value="" data-lang="none_option">${translations[currentLang].none_option}</option>`;
+            headers.forEach(header => {
+                const option = document.createElement('option');
+                option.value = header;
+                option.textContent = header;
+                select.appendChild(option);
+            });
+            document.getElementById('exclusion-column-section').classList.remove('hidden');
+        }
+
+        function clearAll() {
+            fileInput.value = '';
+            fileNameDisplay.textContent = '';
+            quickProcessBtn.disabled = true;
+            fullProcessBtn.disabled = true;
+            document.getElementById('exclusion-column-section').classList.add('hidden');
+            clearAnalysisResults();
+            initializeMap();
+        }
+        function clearAnalysisResults() {
+            resultsOutput.innerHTML = '';
+            messageArea.innerHTML = '';
+            summarySection.classList.add('hidden');
+            resultsHeader.classList.add('hidden');
+            showAllBtn.classList.add('hidden');
+            allProblematicPoints = [];
+            cleanPointsForExport = [];
+            proximityGroups = [];
+            exactDuplicateGroups = [];
+            allPointsForMap = [];
+        }
+
+        // --- FUNÇÕES DE PARSING E DOWNLOAD ---
+        function parseFile(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const data = e.target.result;
+                        if (file.name.toLowerCase().endsWith('.xlsx')) resolve(parseXLSX(data));
+                        else resolve(parseCSV(data));
+                    } catch (err) { reject(err); }
+                };
+                reader.onerror = () => reject(new Error('Não foi possível ler o arquivo.'));
+                if (file.name.toLowerCase().endsWith('.csv')) reader.readAsText(file, 'UTF-8');
+                else reader.readAsArrayBuffer(file);
+            });
+        }
+        function parseXLSX(arrayBuffer) {
+            const workbook = XLSX.read(arrayBuffer, { type: 'buffer' });
+            const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: "" });
+            return processParsedData(jsonData);
+        }
+        function parseCSV(csvText) {
+            const lines = csvText.trim().split(/\r\n|\n/);
+            if (lines.length < 1) throw new Error('CSV vazio.');
+            const delimiter = (lines[0].match(/;/g) || []).length > (lines[0].match(/,/g) || []).length ? ';' : ',';
+            const headers = lines[0].split(delimiter).map(h => h.trim());
+            const jsonData = lines.slice(1).map(line => {
+                const values = line.split(delimiter);
+                return headers.reduce((obj, header, i) => {
+                    obj[header] = values[i] ? values[i].trim() : "";
+                    return obj;
+                }, {});
+            });
+            return processParsedData(jsonData);
+        }
+        function processParsedData(jsonData) {
+            if (jsonData.length === 0) return { headers: [], rows: [] };
+            const headers = Object.keys(jsonData[0]);
+            
+            const findHeader = (possibleNames) => {
+                for (const name of possibleNames) {
+                    const found = headers.find(h => h.trim().toLowerCase() === name);
+                    if (found) return found;
+                }
+                return null;
+            };
+
+            const latHeader = findHeader(['latitude', 'latitude*']);
+            const lonHeader = findHeader(['longitude', 'longitude*']);
+            
+            if (!latHeader || !lonHeader) throw new Error('Colunas "latitude" e "longitude" não encontradas.');
+            
+            const stateHeader = findHeader(['estado', 'uf', 'state*']);
+            const cityHeader = findHeader(['cidade', 'município', 'municipio', 'city*']);
+
+            const rows = jsonData.map((row, index) => {
+                const latStr = String(row[latHeader] || '').replace(',', '.');
+                const lonStr = String(row[lonHeader] || '').replace(',', '.');
+                return {
+                    row: index + 2,
+                    latitude: !isNaN(parseFloat(latStr)) ? parseFloat(latStr) : null,
+                    longitude: !isNaN(parseFloat(lonStr)) ? parseFloat(lonStr) : null,
+                    data: row
+                };
+            });
+            return { headers, rows, rawRows: jsonData, stateHeader, cityHeader };
+        }
+        function downloadXLSX(points, fileName) {
+            if (points.length === 0) {
+                showMessage(translations[currentLang].download_no_data, 'info');
+                return;
+            }
+            const dataToExport = points.map(p => {
+                const row = { ...p.data };
+                if (p.status?.reason && fileName.includes('problematicas')) {
+                    row['MOTIVO_PROBLEMA'] = p.status.reason;
+                    if (p.detectedState !== undefined) {
+                        row['Estado_Detectado'] = p.detectedState;
+                    }
+                    if (p.detectedCity !== undefined) {
+                        row['Cidade_Detectada'] = p.detectedCity;
+                    }
+                }
+                return row;
+            });
+            const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, 'Resultados');
+            XLSX.writeFile(workbook, fileName);
+        }
+    </script>
+</body>
+</html>
