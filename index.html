@@ -205,6 +205,7 @@
         let exactDuplicateGroups = [];
         let stateMismatches = [];
         let cityMismatches = [];
+        let invalidCoordinatePoints = [];
         let allPointsForMap = [];
         let map = null;
         let markerClusterGroup = null;
@@ -259,6 +260,7 @@
                 total_pois_label: "Total de POIs analisados:",
                 exact_overlap_label: "POIs em sobreposição exata:",
                 proximity_label: "Pontos em Proximidade:",
+                invalid_coords_label: "Coordenadas Inválidas:",
                 removed_points_label: "Pontos removidos da base:",
                 clean_points_label: "Pontos na base limpa:",
                 state_mismatch_label: "POIs com Estado incorreto:",
@@ -267,6 +269,7 @@
                 results_title_proximity: "Células de 1m² com Pontos em Proximidade",
                 results_title_exact: "Grupos de Sobreposição Exata",
                 results_title_mismatch: "Inconsistências de Localização",
+                results_title_invalid: "Coordenadas Inválidas",
                 mismatch_state_header: "Estado Incorreto",
                 mismatch_city_header: "Cidade Incorreta",
                 group_card_header: (count) => `Grupos com ${count} pontos`,
@@ -303,6 +306,7 @@
                 total_pois_label: "Total POIs analyzed:",
                 exact_overlap_label: "POIs in exact overlap:",
                 proximity_label: "Points in Proximity:",
+                invalid_coords_label: "Invalid Coordinates:",
                 removed_points_label: "Points removed from base:",
                 clean_points_label: "Points in clean base:",
                 state_mismatch_label: "POIs with incorrect State:",
@@ -311,6 +315,7 @@
                 results_title_proximity: "1m² Cells with Proximity Points",
                 results_title_exact: "Exact Overlap Groups",
                 results_title_mismatch: "Location Mismatches",
+                results_title_invalid: "Invalid Coordinates",
                 mismatch_state_header: "Incorrect State",
                 mismatch_city_header: "Incorrect City",
                 group_card_header: (count) => `Groups with ${count} points`,
@@ -347,6 +352,7 @@
                 total_pois_label: "Total de POI analizados:",
                 exact_overlap_label: "POI en superposición exacta:",
                 proximity_label: "Puntos en Proximidad:",
+                invalid_coords_label: "Coordenadas Inválidas:",
                 removed_points_label: "Puntos eliminados de la base:",
                 clean_points_label: "Puntos en la base limpia:",
                 state_mismatch_label: "POI con Estado incorrecto:",
@@ -355,6 +361,7 @@
                 results_title_proximity: "Celdas de 1m² con Puntos en Proximidad",
                 results_title_exact: "Grupos de Superposición Exacta",
                 results_title_mismatch: "Inconsistencias de Ubicación",
+                results_title_invalid: "Coordenadas Inválidas",
                 mismatch_state_header: "Estado Incorrecto",
                 mismatch_city_header: "Ciudad Incorrecta",
                 group_card_header: (count) => `Grupos con ${count} puntos`,
@@ -471,12 +478,12 @@
             const exclusionColumn = exclusionColumnSelect.value;
             
             const validPoints = [];
-            const localIrregularPoints = [];
+            invalidCoordinatePoints = [];
             
             for (const point of rows) {
                 if (point.latitude === null || point.longitude === null) {
                     point.status = { type: 'invalid', reason: 'Coordenada Inválida/Ausente' };
-                    localIrregularPoints.push(point);
+                    invalidCoordinatePoints.push(point);
                 } else {
                     validPoints.push(point);
                 }
@@ -595,13 +602,13 @@
                 }
             });
 
-            allProblematicPoints = [...localIrregularPoints, ...proximityGroups.flat(), ...exactDuplicateGroups.flat(), ...stateMismatches, ...cityMismatches];
-            const metrics = calculateMetrics(allPointsForMap, isFullAnalysis);
-            displayResults(metrics, proximityGroups, exactDuplicateGroups, localIrregularPoints, stateMismatches, cityMismatches, isFullAnalysis);
+            allProblematicPoints = [...invalidCoordinatePoints, ...proximityGroups.flat(), ...exactDuplicateGroups.flat(), ...stateMismatches, ...cityMismatches];
+            const metrics = calculateMetrics(allPointsForMap, isFullAnalysis, invalidCoordinatePoints.length);
+            displayResults(metrics, proximityGroups, exactDuplicateGroups, invalidCoordinatePoints, stateMismatches, cityMismatches, isFullAnalysis);
             updateMap(allPointsForMap);
         }
         
-        function calculateMetrics(points, isFullAnalysis) {
+        function calculateMetrics(points, isFullAnalysis, invalidCount) {
             const poisInProximity = points.filter(p => p.status.type === 'proximity').length;
             const poisInExactOverlap = points.filter(p => p.status.type === 'duplicate').length;
             
@@ -611,7 +618,7 @@
                 cityMismatchCount = points.filter(p => p.status.reason === 'Cidade Incorreta').length;
             }
 
-            return { poisInProximity, poisInExactOverlap, totalPois: originalData.rows.length, stateMismatches: stateMismatchCount, cityMismatches: cityMismatchCount };
+            return { poisInProximity, poisInExactOverlap, totalPois: originalData.rows.length, stateMismatches: stateMismatchCount, cityMismatches: cityMismatchCount, invalidCoordinates: invalidCount };
         }
 
         // --- FUNÇÕES DE EXIBIÇÃO E UI ---
@@ -640,6 +647,10 @@
                         <span class="font-medium" data-lang="total_pois_label"></span>
                         <span id="metric-total" class="metric-value font-bold text-lg text-gray-800">${metrics.totalPois.toLocaleString('pt-BR')}</span>
                     </div>
+                    <div class="flex justify-between items-center">
+                        <span class="font-medium" data-lang="invalid_coords_label"></span>
+                        <span class="font-bold text-lg text-black">${metrics.invalidCoordinates.toLocaleString('pt-BR')}</span>
+                    </div>
                      <div class="flex justify-between items-center">
                         <span class="font-medium" data-lang="proximity_label"></span>
                         <span id="metric-proximity" class="metric-value font-bold text-lg text-yellow-500">${metrics.poisInProximity.toLocaleString('pt-BR')}</span>
@@ -664,6 +675,11 @@
                 resultsHeader.classList.remove('hidden');
                 showAllBtn.classList.remove('hidden');
                 let resultsHtml = '';
+
+                if (invalidPoints.length > 0) {
+                    resultsHtml += `<h4 class="font-semibold text-md text-gray-700 mt-4 mb-2" data-lang="results_title_invalid"></h4>`;
+                    resultsHtml += createCollapsibleSection(invalidPoints.map(p => [p]), 'invalid');
+                }
 
                 if (isFullAnalysis && (stateMismatches.length > 0 || cityMismatches.length > 0)) {
                      resultsHtml += `<h4 class="font-semibold text-md text-gray-700 mt-4 mb-2" data-lang="results_title_mismatch"></h4>`;
@@ -749,7 +765,8 @@
                         </summary>
                         <div class="p-2 border-t">
                             ${currentGroups.map((group) => {
-                                const originalIndex = (type === 'proximity' ? proximityGroups : exactDuplicateGroups).findIndex(g => g === group);
+                                const groupList = type === 'proximity' ? proximityGroups : (type === 'exact' ? exactDuplicateGroups : []);
+                                const originalIndex = groupList.findIndex(g => g === group);
                                 return createGroupResultCard(group, originalIndex, type);
                             }).join('')}
                         </div>
@@ -761,7 +778,7 @@
 
         function createGroupResultCard(group, index, type) {
             const pointsHtml = group.map(p => 
-                `<li class="flex justify-between items-center text-sm py-1"><span class="font-mono text-gray-700" data-lang="map_popup_row" data-row-number="${p.row}"></span><span class="text-xs text-gray-500">${p.latitude.toFixed(6)}, ${p.longitude.toFixed(6)}</span></li>`
+                `<li class="flex justify-between items-center text-sm py-1"><span class="font-mono text-gray-700" data-lang="map_popup_row" data-row-number="${p.row}"></span><span class="text-xs text-gray-500">${p.latitude !== null ? p.latitude.toFixed(6) : 'N/A'}, ${p.longitude !== null ? p.longitude.toFixed(6) : 'N/A'}</span></li>`
             ).join('');
 
             return `
