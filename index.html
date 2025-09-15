@@ -39,9 +39,6 @@
             border-radius: 0.5rem;
             box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
         }
-        .dark #map {
-            filter: invert(1) hue-rotate(180deg) brightness(0.9) contrast(0.9);
-        }
         .loader {
             border: 5px solid #f3f3f3;
             border-top: 5px solid #3498db;
@@ -540,6 +537,7 @@
         let isProcessingMapQueue = false;
         let isWorkerDone = false;
         let map = null;
+        let lightTiles, darkTiles;
         let markerClusterGroup = null;
         let currentFeatureGroup = null;
         let analysisWorker = null;
@@ -760,10 +758,19 @@
         // --- FUNÇÕES DE INICIALIZAÇÃO ---
         function initializeMap() {
             if (map) map.remove();
-            map = L.map('map').setView([-14.235, -51.925], 4);
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            
+            lightTiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            }).addTo(map);
+            });
+
+            darkTiles = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+            });
+
+            map = L.map('map', {
+                layers: [document.documentElement.classList.contains('dark') ? darkTiles : lightTiles]
+            }).setView([-14.235, -51.925], 4);
+            
             markerClusterGroup = L.markerClusterGroup();
             map.addLayer(markerClusterGroup);
         }
@@ -791,7 +798,6 @@
                 fullProcessBtn.disabled = false;
             } catch(e) {
                 showMessage(translations[currentLang].error_reading_file + ' ' + e.message);
-                clearAll();
             }
         }
 
@@ -1181,18 +1187,14 @@
         // --- FUNÇÕES DE UI E UTILITÁRIOS ---
         function setLanguage(lang) {
             currentLang = lang;
-            if (document.documentElement.lang !== lang.split('-')[0]) {
+            if(document.documentElement.lang.split('-')[0] !== lang) {
                 document.documentElement.lang = lang.split('-')[0];
             }
             
             document.querySelectorAll('[data-lang]').forEach(el => {
                 const key = el.dataset.lang;
-                if (translations[lang] && translations[lang][key]) {
-                    if (typeof translations[lang][key] === 'function') {
-                        // Não atualiza as que precisam de parâmetros aqui
-                    } else {
-                        el.textContent = translations[lang][key];
-                    }
+                if (translations[lang] && translations[lang][key] && typeof translations[lang][key] !== 'function') {
+                    el.textContent = translations[lang][key];
                 }
             });
 
@@ -1245,7 +1247,7 @@
                 option.textContent = header;
                 exclusionColumnSelect.appendChild(option);
             });
-            exclusionColumnSection.classList.remove('hidden');
+            exclusionColumnSelect.classList.remove('hidden');
         }
 
         function clearAll() {
@@ -1254,7 +1256,7 @@
             quickProcessBtn.disabled = true;
             fullProcessBtn.disabled = true;
             columnMappingSection.classList.add('hidden');
-            exclusionColumnSection.classList.add('hidden');
+            exclusionColumnSelect.classList.add('hidden');
             clearAnalysisResults();
             initializeMap();
         }
@@ -1343,6 +1345,15 @@
             let theme = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
             localStorage.setItem('color-theme', theme);
             updateThemeIcons();
+            if (map) {
+                if (theme === 'dark') {
+                    if (map.hasLayer(lightTiles)) map.removeLayer(lightTiles);
+                    if (!map.hasLayer(darkTiles)) map.addLayer(darkTiles);
+                } else {
+                    if (map.hasLayer(darkTiles)) map.removeLayer(darkTiles);
+                    if (!map.hasLayer(lightTiles)) map.addLayer(lightTiles);
+                }
+            }
         });
     </script>
 </body>
