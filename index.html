@@ -135,8 +135,8 @@
                          </select>
                     </div>
                     <div class="mt-6 flex flex-col sm:flex-row gap-4">
-                        <button id="quick-process-btn" class="w-full sm:w-auto bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2 disabled:opacity-50" disabled data-lang="analyze_button_quick">Análise Rápida</button>
-                        <button id="full-process-btn" class="w-full sm:w-auto bg-indigo-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-indigo-700 flex items-center justify-center gap-2 disabled:opacity-50" disabled data-lang="analyze_button_full">Análise Completa</button>
+                        <button id="quick-process-btn" class="w-full sm:w-auto bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2 disabled:opacity-50" disabled data-lang="analyze_button_quick">Análise de Duplicidades</button>
+                        <button id="full-process-btn" class="w-full sm:w-auto bg-indigo-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-indigo-700 flex items-center justify-center gap-2 disabled:opacity-50" disabled data-lang="analyze_button_full">Análise Geográfica</button>
                         <button id="clear-btn" class="w-full sm:w-auto bg-gray-200 text-gray-700 font-semibold py-2 px-4 rounded-lg hover:bg-gray-300 ml-auto" data-lang="clear_button">Limpar</button>
                     </div>
                 </div>
@@ -177,6 +177,271 @@
             </div>
         </main>
     </div>
+    
+    <script id="worker-script" type="javascript/worker">
+        // --- LÓGICA DO WEB WORKER ---
+        importScripts('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
+
+        const stateMap = {
+            'AC': 'Acre', 'AL': 'Alagoas', 'AP': 'Amapá', 'AM': 'Amazonas', 'BA': 'Bahia',
+            'CE': 'Ceará', 'DF': 'Distrito Federal', 'ES': 'Espírito Santo', 'GO': 'Goiás',
+            'MA': 'Maranhão', 'MT': 'Mato Grosso', 'MS': 'Mato Grosso do Sul', 'MG': 'Minas Gerais',
+            'PA': 'Pará', 'PB': 'Paraíba', 'PR': 'Paraná', 'PE': 'Pernambuco', 'PI': 'Piauí',
+            'RJ': 'Rio de Janeiro', 'RN': 'Rio Grande do Norte', 'RS': 'Rio Grande do Sul',
+            'RO': 'Rondônia', 'RR': 'Roraima', 'SC': 'Santa Catarina', 'SP': 'São Paulo',
+            'SE': 'Sergipe', 'TO': 'Tocantins'
+        };
+
+        function roundHalfToEven(value) {
+            const floor = Math.floor(value);
+            const decimal = value - floor;
+            if (decimal !== 0.5) return Math.round(value);
+            return floor % 2 === 0 ? floor : Math.ceil(value);
+        }
+        
+        async function getReverseGeocode(lat, lon) {
+            const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&accept-language=en`;
+            try {
+                const response = await fetch(url);
+                if (!response.ok) return { state: null, city: null };
+                const data = await response.json();
+                return {
+                    state: data?.address?.state,
+                    city: data?.address?.city || data?.address?.town || data?.address?.village
+                };
+            } catch (error) {
+                console.error("Geocoding error:", error);
+                return { state: null, city: null };
+            }
+        }
+        
+        function processParsedData(jsonData) {
+            if (jsonData.length === 0) return { headers: [], rows: [] };
+            const headers = Object.keys(jsonData[0]);
+            
+            const findHeader = (possibleNames) => {
+                for (const name of possibleNames) {
+                    const found = headers.find(h => h.trim().toLowerCase() === name);
+                    if (found) return found;
+                }
+                return null;
+            };
+
+            const latHeader = findHeader(['latitude', 'latitude*']);
+            const lonHeader = findHeader(['longitude', 'longitude*']);
+            
+            if (!latHeader || !lonHeader) throw new Error('Colunas "latitude" e "longitude" não encontradas.');
+            
+            const stateHeader = findHeader(['estado', 'uf', 'state*']);
+            const cityHeader = findHeader(['cidade', 'município', 'municipio', 'city*']);
+
+            const rows = jsonData.map((row, index) => {
+                const latStr = String(row[latHeader] || '').replace(',', '.');
+                const lonStr = String(row[lonHeader] || '').replace(',', '.');
+                return {
+                    row: index + 2,
+                    latitude: !isNaN(parseFloat(latStr)) ? parseFloat(latStr) : null,
+                    longitude: !isNaN(parseFloat(lonStr)) ? parseFloat(lonStr) : null,
+                    data: row
+                };
+            });
+            return { headers, rows, stateHeader, cityHeader };
+        }
+
+
+        self.onmessage = async (event) => {
+            const { fileContent, fileType, exclusionColumn, isFullAnalysis } = event.data;
+            let isGeocodingCancelled = false;
+            
+            self.onmessage = (e) => {
+                if (e.data.action === 'cancel') isGeocodingCancelled = true;
+            };
+
+            // 1. PARSING
+            self.postMessage({ type: 'progress', payload: { stage: 'parsing' } });
+            let jsonData;
+            try {
+                if (fileType === 'xlsx') {
+                    const workbook = XLSX.read(fileContent, { type: 'buffer' });
+                    jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: "" });
+                } else {
+                     const lines = fileContent.trim().split(/\r\n|\n/);
+                    if (lines.length < 1) throw new Error('CSV vazio.');
+                    const delimiter = (lines[0].match(/;/g) || []).length > (lines[0].match(/,/g) || []).length ? ';' : ',';
+                    const headers = lines[0].split(delimiter).map(h => h.trim());
+                    jsonData = lines.slice(1).map(line => {
+                        const values = line.split(delimiter);
+                        return headers.reduce((obj, header, i) => {
+                            obj[header] = values[i] ? values[i].trim() : "";
+                            return obj;
+                        }, {});
+                    });
+                }
+            } catch (e) {
+                self.postMessage({ type: 'error', payload: e.message });
+                return;
+            }
+
+            const { rows, headers, stateHeader, cityHeader } = processParsedData(jsonData);
+            
+            // 2. ANÁLISE
+            const validPoints = [];
+            const invalidCoordinatePoints = [];
+            
+            for (const point of rows) {
+                if (point.latitude === null || point.longitude === null) {
+                    point.status = { type: 'invalid', reason: 'Coordenada Inválida/Ausente' };
+                    invalidCoordinatePoints.push(point);
+                } else {
+                    validPoints.push(point);
+                }
+            }
+
+            if (isFullAnalysis) {
+                let geocodedCount = 0;
+                for (const point of validPoints) {
+                    if (isGeocodingCancelled) break;
+                    const location = await getReverseGeocode(point.latitude, point.longitude);
+                    point.detectedState = location.state;
+                    point.detectedCity = location.city;
+                    
+                    const providedState = (point.data[stateHeader] || '').trim();
+                    const detectedState = (location.state || '').trim();
+                    point.stateMatch = providedState.toLowerCase() === detectedState.toLowerCase() ||
+                                       stateMap[providedState.toUpperCase()] === detectedState;
+
+                    point.cityMatch = (point.data[cityHeader] || '').trim().toLowerCase() === (location.city || '').trim().toLowerCase();
+                    geocodedCount++;
+                    self.postMessage({ type: 'progress', payload: { stage: 'geocoding', current: geocodedCount, total: validPoints.length } });
+                    if(geocodedCount % 10 === 0) await new Promise(resolve => setTimeout(resolve, 1));
+                }
+            }
+
+            const meterSquareGroups = new Map();
+            const resolution = 0.00001;
+            validPoints.forEach(point => {
+                const latRounded = roundHalfToEven(point.latitude / resolution);
+                const lonRounded = roundHalfToEven(point.longitude / resolution);
+                const key = `${latRounded},${lonRounded}`;
+                if (!meterSquareGroups.has(key)) meterSquareGroups.set(key, []);
+                meterSquareGroups.get(key).push(point);
+            });
+
+            const cleanPointsForExport = [];
+            const proximityGroups = [];
+            const exactDuplicateGroups = [];
+            const stateMismatches = [];
+            const cityMismatches = [];
+            
+            const totalGroups = meterSquareGroups.size;
+            let processedGroups = 0;
+
+            meterSquareGroups.forEach(group => {
+                processedGroups++;
+                if (processedGroups % 500 === 0 || processedGroups === totalGroups) {
+                     self.postMessage({ type: 'progress', payload: { stage: 'analysis', current: processedGroups, total: totalGroups } });
+                }
+
+                const subgroups = new Map();
+                group.forEach(p => {
+                    const key = exclusionColumn ? `${p.latitude},${p.longitude},${p.data[exclusionColumn]}` : `${p.latitude},${p.longitude}`;
+                    if (!subgroups.has(key)) subgroups.set(key, []);
+                    subgroups.get(key).push(p);
+                });
+
+                if (group.length === 1) {
+                    const point = group[0];
+                    if (isFullAnalysis) {
+                        if (!point.stateMatch) {
+                            point.status = { type: 'location', reason: 'Estado Incorreto' };
+                            stateMismatches.push(point);
+                        } else if (!point.cityMatch) {
+                            point.status = { type: 'location', reason: 'Cidade Incorreta' };
+                            cityMismatches.push(point);
+                        } else {
+                            point.status = { type: 'clean', reason: 'Ponto Válido' };
+                            cleanPointsForExport.push(point);
+                        }
+                    } else {
+                        point.status = { type: 'clean', reason: 'Ponto Válido' };
+                        cleanPointsForExport.push(point);
+                    }
+                } else {
+                    if (subgroups.size > 1) {
+                        proximityGroups.push(group);
+                    } else {
+                        exactDuplicateGroups.push(group);
+                    }
+                    
+                    subgroups.forEach(subgroup => {
+                        let problemFound = false;
+                        if (isFullAnalysis) {
+                            for(const p of subgroup) {
+                                if (!p.stateMatch) {
+                                    p.status = { type: 'location', reason: 'Estado Incorreto' };
+                                    stateMismatches.push(p);
+                                    problemFound = true;
+                                } else if (!p.cityMatch) {
+                                    p.status = { type: 'location', reason: 'Cidade Incorreta' };
+                                    cityMismatches.push(p);
+                                    problemFound = true;
+                                }
+                            }
+                        }
+
+                        if(!problemFound) {
+                            if (subgroups.size > 1) {
+                                subgroup.forEach(p => p.status = { type: 'proximity', reason: 'Proximidade' });
+                            } else {
+                                subgroup[0].status = { type: 'duplicate', reason: `Duplicata (${subgroup.length - 1} extra)` };
+                                for (let i = 1; i < subgroup.length; i++) {
+                                    subgroup[i].status = { type: 'duplicate', reason: 'Duplicata exata' };
+                                }
+                            }
+                        }
+                        
+                        cleanPointsForExport.push(subgroup[0]); 
+                    });
+                }
+            });
+
+            const allProblematicPoints = [...invalidCoordinatePoints, ...proximityGroups.flat(), ...exactDuplicateGroups.flat(), ...stateMismatches, ...cityMismatches];
+            const allPointsForMap = [...cleanPointsForExport, ...allProblematicPoints];
+
+            // Otimização: Transferir apenas o necessário para a UI principal
+            const summaryPayload = {
+                metrics: {
+                    totalPois: rows.length,
+                    invalidCoordinates: invalidCoordinatePoints.length,
+                    poisInProximity: proximityGroups.flat().length,
+                    poisInExactOverlap: exactDuplicateGroups.flat().length,
+                    stateMismatches: stateMismatches.length,
+                    cityMismatches: cityMismatches.length,
+                    cleanPointsCount: cleanPointsForExport.length
+                },
+                proximityGroups,
+                exactDuplicateGroups,
+                invalidCoordinatePoints,
+                stateMismatches,
+                cityMismatches,
+                originalData: { headers, stateHeader, cityHeader }
+            };
+
+            self.postMessage({ type: 'result-summary', payload: summaryPayload });
+            
+            // Otimização: Enviar dados do mapa em blocos
+            const CHUNK_SIZE = 10000;
+            for (let i = 0; i < allPointsForMap.length; i += CHUNK_SIZE) {
+                const chunk = allPointsForMap.slice(i, i + CHUNK_SIZE);
+                self.postMessage({ type: 'map-data-chunk', payload: chunk });
+                await new Promise(resolve => setTimeout(resolve, 10)); 
+            }
+
+            self.postMessage({ type: 'full-data-for-download', payload: { cleanPointsForExport, allProblematicPoints } });
+
+            self.postMessage({ type: 'done' });
+        };
+    </script>
 
     <script>
         // --- ELEMENTOS DA UI ---
@@ -198,7 +463,7 @@
         const showAllBtn = document.getElementById('show-all-btn');
 
         // --- ESTADO DA APLICAÇÃO ---
-        let originalData = { headers: [], rows: [], rawRows: [] };
+        let originalData = { headers: [] };
         let allProblematicPoints = [];
         let cleanPointsForExport = [];
         let proximityGroups = [];
@@ -206,12 +471,17 @@
         let stateMismatches = [];
         let cityMismatches = [];
         let invalidCoordinatePoints = [];
-        let allPointsForMap = [];
+        let allPointsForMap_main = []; // Para filtragem
+        let mapDataQueue = [];
+        let isProcessingMapQueue = false;
+        let isWorkerDone = false;
         let map = null;
         let markerClusterGroup = null;
         let currentFeatureGroup = null;
-        let isGeocodingCancelled = false;
+        let analysisWorker = null;
         let currentLang = 'pt';
+        let totalPointsToLoad = 0;
+        let totalPointsLoaded = 0;
 
         // --- ÍCONES DO MAPA ---
         const createIcon = (color) => new L.Icon({
@@ -227,16 +497,7 @@
             location: createIcon('violet')
         };
 
-        // --- TRADUÇÕES E MAPAS ---
-        const stateMap = {
-            'AC': 'Acre', 'AL': 'Alagoas', 'AP': 'Amapá', 'AM': 'Amazonas', 'BA': 'Bahia',
-            'CE': 'Ceará', 'DF': 'Distrito Federal', 'ES': 'Espírito Santo', 'GO': 'Goiás',
-            'MA': 'Maranhão', 'MT': 'Mato Grosso', 'MS': 'Mato Grosso do Sul', 'MG': 'Minas Gerais',
-            'PA': 'Pará', 'PB': 'Paraíba', 'PR': 'Paraná', 'PE': 'Pernambuco', 'PI': 'Piauí',
-            'RJ': 'Rio de Janeiro', 'RN': 'Rio Grande do Norte', 'RS': 'Rio Grande do Sul',
-            'RO': 'Rondônia', 'RR': 'Roraima', 'SC': 'Santa Catarina', 'SP': 'São Paulo',
-            'SE': 'Sergipe', 'TO': 'Tocantins'
-        };
+        // --- TRADUÇÕES ---
         const translations = {
             pt: {
                 main_title: "Analisador Avançado de Pontos de Interesse (POIs)",
@@ -245,11 +506,14 @@
                 select_file: "1. Selecione o arquivo (.xlsx, .csv)",
                 tie_breaker_column: "2. Coluna para desempate (opcional)",
                 none_option: "Nenhuma",
-                analyze_button_quick: "Análise Rápida",
-                analyze_button_full: "Análise Completa",
+                analyze_button_quick: "Análise de Duplicidades",
+                analyze_button_full: "Análise Geográfica",
                 clear_button: "Limpar",
                 processing_message: "A processar os dados...",
+                parsing_message: "A ler o ficheiro...",
+                analyzing_message: (current, total) => `Analisando: ${Math.round((current/total)*100)}%`,
                 geocoding_message: (current, total) => `Geocodificando: ${current} / ${total}`,
+                map_loading_message: (current, total) => `A carregar pontos: ${current} / ${total}`,
                 cancel_geocoding_button: "Cancelar",
                 downloads_title: "Downloads",
                 download_clean_button: "Base Limpa (XLSX)",
@@ -266,10 +530,10 @@
                 state_mismatch_label: "POIs com Estado incorreto:",
                 city_mismatch_label: "POIs com Cidade incorreta:",
                 error_full_analysis_cols: "Para a Análise Completa, o arquivo deve conter colunas de localização (Estado/UF e Cidade/Município).",
-                results_title_proximity: "Células de 1m² com Pontos em Proximidade",
-                results_title_exact: "Grupos de Sobreposição Exata",
+                results_title_proximity: "Células com Pontos em Proximidade (Top 100)",
+                results_title_exact: "Grupos de Sobreposição Exata (Top 100)",
                 results_title_mismatch: "Inconsistências de Localização",
-                results_title_invalid: "Coordenadas Inválidas",
+                results_title_invalid: "Coordenadas Inválidas (Top 100)",
                 mismatch_state_header: "Estado Incorreto",
                 mismatch_city_header: "Cidade Incorreta",
                 group_card_header: (count) => `Grupos com ${count} pontos`,
@@ -291,11 +555,14 @@
                 select_file: "1. Select the file (.xlsx, .csv)",
                 tie_breaker_column: "2. Tie-breaker column (optional)",
                 none_option: "None",
-                analyze_button_quick: "Quick Analysis",
-                analyze_button_full: "Full Analysis",
+                analyze_button_quick: "Duplicate Analysis",
+                analyze_button_full: "Geographic Analysis",
                 clear_button: "Clear",
                 processing_message: "Processing data...",
+                parsing_message: "Reading file...",
+                analyzing_message: (current, total) => `Analyzing: ${Math.round((current/total)*100)}%`,
                 geocoding_message: (current, total) => `Geocoding: ${current} / ${total}`,
+                map_loading_message: (current, total) => `Loading points: ${current} / ${total}`,
                 cancel_geocoding_button: "Cancel",
                 downloads_title: "Downloads",
                 download_clean_button: "Clean Base (XLSX)",
@@ -312,10 +579,10 @@
                 state_mismatch_label: "POIs with incorrect State:",
                 city_mismatch_label: "POIs with incorrect City:",
                 error_full_analysis_cols: "For Full Analysis, the file must contain location columns (State/UF and City/Município).",
-                results_title_proximity: "1m² Cells with Proximity Points",
-                results_title_exact: "Exact Overlap Groups",
+                results_title_proximity: "Cells with Proximity Points (Top 100)",
+                results_title_exact: "Exact Overlap Groups (Top 100)",
                 results_title_mismatch: "Location Mismatches",
-                results_title_invalid: "Invalid Coordinates",
+                results_title_invalid: "Invalid Coordinates (Top 100)",
                 mismatch_state_header: "Incorrect State",
                 mismatch_city_header: "Incorrect City",
                 group_card_header: (count) => `Groups with ${count} points`,
@@ -337,11 +604,14 @@
                 select_file: "1. Seleccione el archivo (.xlsx, .csv)",
                 tie_breaker_column: "2. Columna de desempate (opcional)",
                 none_option: "Ninguna",
-                analyze_button_quick: "Análisis Rápido",
-                analyze_button_full: "Análisis Completo",
+                analyze_button_quick: "Análisis de Duplicados",
+                analyze_button_full: "Análisis Geográfico",
                 clear_button: "Limpiar",
                 processing_message: "Procesando datos...",
+                parsing_message: "Leyendo el archivo...",
+                analyzing_message: (current, total) => `Analizando: ${Math.round((current/total)*100)}%`,
                 geocoding_message: (current, total) => `Geocodificando: ${current} / ${total}`,
+                map_loading_message: (current, total) => `Cargando puntos: ${current} / ${total}`,
                 cancel_geocoding_button: "Cancelar",
                 downloads_title: "Descargas",
                 download_clean_button: "Base Limpia (XLSX)",
@@ -358,10 +628,10 @@
                 state_mismatch_label: "POI con Estado incorrecto:",
                 city_mismatch_label: "POI con Ciudad incorrecta:",
                 error_full_analysis_cols: "Para el Análisis Completo, el archivo debe contener columnas de ubicación (Estado/UF y Ciudad/Municipio).",
-                results_title_proximity: "Celdas de 1m² con Puntos en Proximidad",
-                results_title_exact: "Grupos de Superposición Exacta",
+                results_title_proximity: "Celdas con Puntos en Proximidad (Top 100)",
+                results_title_exact: "Grupos de Superposición Exacta (Top 100)",
                 results_title_mismatch: "Inconsistencias de Ubicación",
-                results_title_invalid: "Coordenadas Inválidas",
+                results_title_invalid: "Coordenadas Inválidas (Top 100)",
                 mismatch_state_header: "Estado Incorrecto",
                 mismatch_city_header: "Ciudad Incorrecta",
                 group_card_header: (count) => `Grupos con ${count} puntos`,
@@ -383,13 +653,13 @@
         quickProcessBtn.addEventListener('click', () => handleFileProcessing(false));
         fullProcessBtn.addEventListener('click', () => handleFileProcessing(true));
         clearBtn.addEventListener('click', clearAll);
-        cancelGeocodingBtn.addEventListener('click', () => { isGeocodingCancelled = true; });
+        cancelGeocodingBtn.addEventListener('click', () => { 
+            if(analysisWorker) analysisWorker.postMessage({ action: 'cancel' });
+        });
         downloadProblematicXlsxBtn.addEventListener('click', () => downloadXLSX(allProblematicPoints, 'coordenadas_problematicas.xlsx'));
         downloadCleanXlsxBtn.addEventListener('click', () => downloadXLSX(cleanPointsForExport, 'base_limpa.xlsx'));
         showAllBtn.addEventListener('click', () => {
-            if (allPointsForMap.length > 0) {
-                displayPointsOnMap(allPointsForMap, true);
-            }
+            displayPointsOnMap(allPointsForMap_main, true);
         });
         document.querySelectorAll('.lang-flag').forEach(flag => {
             flag.addEventListener('click', (e) => setLanguage(e.currentTarget.dataset.langCode));
@@ -417,214 +687,144 @@
                 fullProcessBtn.disabled = true;
                 return;
             }
-            
             const file = fileInput.files[0];
             fileNameDisplay.textContent = file.name;
-            loader.classList.remove('hidden');
-
-            try {
-                originalData = await parseFile(file);
-                populateExclusionDropdown(originalData.headers);
-                quickProcessBtn.disabled = false;
-                fullProcessBtn.disabled = false;
-            } catch (error) {
-                showMessage(translations[currentLang].error_reading_file + ' ' + error.message);
-                clearAll();
-            } finally {
-                loader.classList.add('hidden');
-            }
+            quickProcessBtn.disabled = false;
+            fullProcessBtn.disabled = false;
         }
 
         async function handleFileProcessing(isFullAnalysis) {
             clearAnalysisResults();
-            if (originalData.rows.length === 0) {
+            if (!fileInput.files.length) {
                 showMessage(translations[currentLang].error_no_data);
                 return;
             }
+
             loader.classList.remove('hidden');
-            if(isFullAnalysis) {
-                cancelGeocodingBtn.classList.remove('hidden');
-            }
-            
-            setTimeout(async () => {
-                try {
-                    await processAndDisplayData(isFullAnalysis);
-                } catch (error) {
-                    showMessage(translations[currentLang].error_generic + ' ' + error.message);
-                } finally {
+            loaderText.textContent = translations[currentLang].processing_message;
+            if(isFullAnalysis) cancelGeocodingBtn.classList.remove('hidden');
+
+            const workerScript = document.getElementById('worker-script').textContent;
+            const workerBlob = new Blob([workerScript], { type: 'application/javascript' });
+            analysisWorker = new Worker(URL.createObjectURL(workerBlob));
+
+            analysisWorker.onmessage = (e) => {
+                const { type, payload } = e.data;
+
+                if (type === 'progress') {
+                    const { stage, current, total } = payload;
+                    if (stage === 'geocoding') loaderText.textContent = translations[currentLang].geocoding_message(current, total);
+                    else if (stage === 'parsing') loaderText.textContent = translations[currentLang].parsing_message;
+                    else loaderText.textContent = translations[currentLang].analyzing_message(current, total);
+                } else if (type === 'result-summary') {
+                    proximityGroups = payload.proximityGroups;
+                    exactDuplicateGroups = payload.exactDuplicateGroups;
+                    invalidCoordinatePoints = payload.invalidCoordinatePoints;
+                    stateMismatches = payload.stateMismatches;
+                    cityMismatches = payload.cityMismatches;
+                    originalData = payload.originalData;
+                    displayResults(payload.metrics, proximityGroups, exactDuplicateGroups, invalidCoordinatePoints, stateMismatches, cityMismatches, isFullAnalysis);
+                    
+                    totalPointsToLoad = payload.metrics.totalPois - payload.metrics.invalidCoordinates;
+                    totalPointsLoaded = 0;
+                    loaderText.textContent = translations[currentLang].map_loading_message(totalPointsLoaded, totalPointsToLoad);
+
+                    markerClusterGroup.clearLayers();
+                    allPointsForMap_main = [];
+                    mapDataQueue = [];
+                    isProcessingMapQueue = false;
+                    isWorkerDone = false;
+                } else if (type === 'map-data-chunk') {
+                    mapDataQueue.push(payload);
+                    if (!isProcessingMapQueue) {
+                        processMapQueue();
+                    }
+                } else if (type === 'full-data-for-download') {
+                    cleanPointsForExport = payload.cleanPointsForExport;
+                    allProblematicPoints = payload.allProblematicPoints;
+                } else if (type === 'done') {
+                    isWorkerDone = true;
+                    if (!isProcessingMapQueue) {
+                        processMapQueue(); // Final check
+                    }
+                } else if (type === 'error') {
+                    showMessage(translations[currentLang].error_generic + ' ' + payload);
                     loader.classList.add('hidden');
                     cancelGeocodingBtn.classList.add('hidden');
+                    if(analysisWorker) analysisWorker.terminate();
                 }
-            }, 50);
-        }
-        
-        // --- LÓGICA DE PROCESSAMENTO DE DADOS ---
-        
-        function roundHalfToEven(value) {
-            const floor = Math.floor(value);
-            const decimal = value - floor;
-            if (decimal !== 0.5) {
-                return Math.round(value);
-            }
-            if (floor % 2 === 0) {
-                return floor;
-            }
-            return Math.ceil(value);
+            };
+
+            analysisWorker.onerror = (e) => {
+                showMessage(translations[currentLang].error_generic + ' ' + e.message);
+                loader.classList.add('hidden');
+                cancelGeocodingBtn.classList.add('hidden');
+                if(analysisWorker) analysisWorker.terminate();
+            };
+
+            const file = fileInput.files[0];
+            const fileType = file.name.toLowerCase().endsWith('.xlsx') ? 'xlsx' : 'csv';
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                analysisWorker.postMessage({
+                    fileContent: e.target.result,
+                    fileType,
+                    exclusionColumn: exclusionColumnSelect.value,
+                    isFullAnalysis: isFullAnalysis
+                }, [e.target.result]);
+            };
+            
+            reader.readAsArrayBuffer(file);
         }
 
-        async function processAndDisplayData(isFullAnalysis) {
-            isGeocodingCancelled = false;
-            const { rows, stateHeader, cityHeader } = originalData;
-            const exclusionColumn = exclusionColumnSelect.value;
-            
-            const validPoints = [];
-            invalidCoordinatePoints = [];
-            
-            for (const point of rows) {
-                if (point.latitude === null || point.longitude === null) {
-                    point.status = { type: 'invalid', reason: 'Coordenada Inválida/Ausente' };
-                    invalidCoordinatePoints.push(point);
-                } else {
-                    validPoints.push(point);
-                }
-            }
+        function processMapQueue() {
+            if (isProcessingMapQueue) return;
+            isProcessingMapQueue = true;
 
-            if (isFullAnalysis) {
-                 if (!stateHeader || !cityHeader) {
-                    showMessage(translations[currentLang].error_full_analysis_cols);
-                    loader.classList.add('hidden');
-                    cancelGeocodingBtn.classList.add('hidden');
-                    return;
-                }
-                
-                loaderText.textContent = translations[currentLang].geocoding_message(0, validPoints.length);
-                let geocodedCount = 0;
-                for (const point of validPoints) {
-                    if (isGeocodingCancelled) break;
-                    const location = await getReverseGeocode(point.latitude, point.longitude);
-                    point.detectedState = location.state;
-                    point.detectedCity = location.city;
+            function processChunk() {
+                if (mapDataQueue.length > 0) {
+                    const chunk = mapDataQueue.shift();
+                    allPointsForMap_main.push(...chunk);
+                    addPointsToMap(chunk);
+                    totalPointsLoaded += chunk.length;
+                    loaderText.textContent = translations[currentLang].map_loading_message(totalPointsLoaded, totalPointsToLoad);
                     
-                    const providedState = (point.data[stateHeader] || '').trim();
-                    const detectedState = (location.state || '').trim();
-                    point.stateMatch = providedState.toLowerCase() === detectedState.toLowerCase() ||
-                                       stateMap[providedState.toUpperCase()] === detectedState;
-
-                    point.cityMatch = (point.data[cityHeader] || '').trim().toLowerCase() === (location.city || '').trim().toLowerCase();
-                    geocodedCount++;
-                    loaderText.textContent = translations[currentLang].geocoding_message(geocodedCount, validPoints.length);
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                }
-                loaderText.textContent = translations[currentLang].processing_message;
-            }
-
-            const meterSquareGroups = new Map();
-            const resolution = 0.00001;
-            validPoints.forEach(point => {
-                const latRounded = roundHalfToEven(point.latitude / resolution);
-                const lonRounded = roundHalfToEven(point.longitude / resolution);
-                const key = `${latRounded},${lonRounded}`;
-                if (!meterSquareGroups.has(key)) meterSquareGroups.set(key, []);
-                meterSquareGroups.get(key).push(point);
-            });
-
-            cleanPointsForExport = [];
-            proximityGroups = [];
-            exactDuplicateGroups = [];
-            stateMismatches = [];
-            cityMismatches = [];
-            allPointsForMap = [];
-            
-            meterSquareGroups.forEach(group => {
-                const subgroups = new Map();
-                group.forEach(p => {
-                    const key = exclusionColumn ? `${p.latitude},${p.longitude},${p.data[exclusionColumn]}` : `${p.latitude},${p.longitude}`;
-                    if (!subgroups.has(key)) subgroups.set(key, []);
-                    subgroups.get(key).push(p);
-                });
-
-                if (group.length === 1) {
-                    const point = group[0];
-                    if (isFullAnalysis) {
-                        if (!point.stateMatch) {
-                            point.status = { type: 'location', reason: 'Estado Incorreto' };
-                            stateMismatches.push(point);
-                        } else if (!point.cityMatch) {
-                            point.status = { type: 'location', reason: 'Cidade Incorreta' };
-                            cityMismatches.push(point);
-                        } else {
-                            point.status = { type: 'clean', reason: translations[currentLang].map_popup_status_clean };
-                            cleanPointsForExport.push(point);
-                        }
-                    } else {
-                        point.status = { type: 'clean', reason: translations[currentLang].map_popup_status_clean };
-                        cleanPointsForExport.push(point);
-                    }
-                    allPointsForMap.push(point);
+                    setTimeout(processChunk, 0); 
                 } else {
-                    if (subgroups.size > 1) {
-                        proximityGroups.push(group);
-                    } else {
-                        exactDuplicateGroups.push(group);
+                    isProcessingMapQueue = false;
+                    if (isWorkerDone) {
+                        // Worker is done sending, and queue is empty. Finalize.
+                        if (markerClusterGroup.getLayers().length > 0) {
+                            map.fitBounds(markerClusterGroup.getBounds(), { padding: [50, 50], maxZoom: 18 });
+                        }
+                        loader.classList.add('hidden');
+                        cancelGeocodingBtn.classList.add('hidden');
+                        if (analysisWorker) {
+                            analysisWorker.terminate();
+                            analysisWorker = null;
+                        }
                     }
-                    
-                    subgroups.forEach(subgroup => {
-                        let isClean = true;
-                        if (isFullAnalysis) {
-                            for(const p of subgroup) {
-                                if (!p.stateMatch) {
-                                    p.status = { type: 'location', reason: 'Estado Incorreto' };
-                                    stateMismatches.push(p);
-                                    isClean = false;
-                                } else if (!p.cityMatch) {
-                                    p.status = { type: 'location', reason: 'Cidade Incorreta' };
-                                    cityMismatches.push(p);
-                                    isClean = false;
-                                }
-                            }
-                        }
-
-                        if(isClean) {
-                            const isProximity = subgroups.size > 1 && subgroup.length === 1;
-                            if (isProximity) {
-                                subgroup[0].status = { type: 'proximity', reason: 'Proximidade' };
-                            } else {
-                                subgroup[0].status = { type: 'duplicate', reason: `Duplicata (${subgroup.length - 1} extra)` };
-                                for (let i = 1; i < subgroup.length; i++) {
-                                    subgroup[i].status = { type: 'duplicate', reason: 'Duplicata exata' };
-                                }
-                            }
-                        }
-                        
-                        cleanPointsForExport.push(subgroup[0]); 
-                        allPointsForMap.push(...subgroup);
-                    });
                 }
-            });
-
-            allProblematicPoints = [...invalidCoordinatePoints, ...proximityGroups.flat(), ...exactDuplicateGroups.flat(), ...stateMismatches, ...cityMismatches];
-            const metrics = calculateMetrics(allPointsForMap, isFullAnalysis, invalidCoordinatePoints.length);
-            displayResults(metrics, proximityGroups, exactDuplicateGroups, invalidCoordinatePoints, stateMismatches, cityMismatches, isFullAnalysis);
-            updateMap(allPointsForMap);
+            }
+            processChunk();
         }
         
-        function calculateMetrics(points, isFullAnalysis, invalidCount) {
-            const poisInProximity = points.filter(p => p.status.type === 'proximity').length;
-            const poisInExactOverlap = points.filter(p => p.status.type === 'duplicate').length;
-            
-            let stateMismatchCount = 0, cityMismatchCount = 0;
-            if (isFullAnalysis) {
-                stateMismatchCount = points.filter(p => p.status.reason === 'Estado Incorreto').length;
-                cityMismatchCount = points.filter(p => p.status.reason === 'Cidade Incorreta').length;
-            }
-
-            return { poisInProximity, poisInExactOverlap, totalPois: originalData.rows.length, stateMismatches: stateMismatchCount, cityMismatches: cityMismatchCount, invalidCoordinates: invalidCount };
+        function addPointsToMap(points) {
+            if (!points || points.length === 0) return;
+            const markers = points.map(poi => {
+                if(poi.latitude === null || poi.longitude === null) return null;
+                const icon = icons[poi.status.type] || icons.duplicate;
+                const marker = L.marker([poi.latitude, poi.longitude], { icon: icon });
+                marker.bindPopup(`<b>${translations[currentLang].map_popup_row}:</b> ${poi.row}<br><b>Lat:</b> ${poi.latitude}<br><b>Lon:</b> ${poi.longitude}<br><b>${translations[currentLang].map_popup_status}:</b> ${poi.status.reason}`);
+                return marker;
+            }).filter(Boolean);
+            if(markers.length > 0) markerClusterGroup.addLayers(markers);
         }
 
         // --- FUNÇÕES DE EXIBIÇÃO E UI ---
         function displayResults(metrics, proxGroups, exactGroups, invalidPoints, stateMismatches, cityMismatches, isFullAnalysis) {
-            const pontosRemovidos = originalData.rows.length - cleanPointsForExport.length;
-            const pontosRestantes = cleanPointsForExport.length;
+            const pontosRemovidos = metrics.totalPois - metrics.cleanPointsCount;
+            const pontosRestantes = metrics.cleanPointsCount;
 
             let fullAnalysisMetrics = '';
             if (isFullAnalysis) {
@@ -671,28 +871,29 @@
                 </div>`;
             summarySection.classList.remove('hidden');
 
-            if (allProblematicPoints.length > 0) {
+            const LIMIT = 100;
+            if (invalidPoints.length + proxGroups.length + exactGroups.length + stateMismatches.length + cityMismatches.length > 0) {
                 resultsHeader.classList.remove('hidden');
                 showAllBtn.classList.remove('hidden');
                 let resultsHtml = '';
 
                 if (invalidPoints.length > 0) {
                     resultsHtml += `<h4 class="font-semibold text-md text-gray-700 mt-4 mb-2" data-lang="results_title_invalid"></h4>`;
-                    resultsHtml += createCollapsibleSection(invalidPoints.map(p => [p]), 'invalid');
+                    resultsHtml += createCollapsibleSection(invalidPoints.slice(0, LIMIT).map(p => [p]), 'invalid');
                 }
 
                 if (isFullAnalysis && (stateMismatches.length > 0 || cityMismatches.length > 0)) {
                      resultsHtml += `<h4 class="font-semibold text-md text-gray-700 mt-4 mb-2" data-lang="results_title_mismatch"></h4>`;
-                     resultsHtml += createMismatchSection(stateMismatches, cityMismatches);
+                     resultsHtml += createMismatchSection(stateMismatches.slice(0, LIMIT), cityMismatches.slice(0, LIMIT));
                 }
 
                 if (exactGroups.length > 0) {
                     resultsHtml += `<h4 class="font-semibold text-md text-gray-700 mt-4 mb-2" data-lang="results_title_exact"></h4>`;
-                    resultsHtml += createCollapsibleSection(exactGroups, 'exact');
+                    resultsHtml += createCollapsibleSection(exactGroups.slice(0, LIMIT), 'exact');
                 }
                 if (proxGroups.length > 0) {
                     resultsHtml += `<h4 class="font-semibold text-md text-gray-700 mt-4 mb-2" data-lang="results_title_proximity"></h4>`;
-                    resultsHtml += createCollapsibleSection(proxGroups, 'proximity');
+                    resultsHtml += createCollapsibleSection(proxGroups.slice(0, LIMIT), 'proximity');
                 }
                 
                 resultsOutput.innerHTML = resultsHtml;
@@ -764,8 +965,8 @@
                             <span class="text-sm text-gray-500" data-lang-count-groups="${currentGroups.length}"></span>
                         </summary>
                         <div class="p-2 border-t">
-                            ${currentGroups.map((group) => {
-                                const groupList = type === 'proximity' ? proximityGroups : (type === 'exact' ? exactDuplicateGroups : []);
+                            ${currentGroups.map((group, idx) => {
+                                const groupList = type === 'proximity' ? proximityGroups : (type === 'exact' ? exactDuplicateGroups : invalidCoordinatePoints.map(p=>[p]));
                                 const originalIndex = groupList.findIndex(g => g === group);
                                 return createGroupResultCard(group, originalIndex, type);
                             }).join('')}
@@ -794,12 +995,12 @@
         }
         
         function addMetricListeners(stateMismatches, cityMismatches){
-            document.getElementById('metric-total')?.addEventListener('click', () => displayPointsOnMap(allPointsForMap, true));
-            document.getElementById('metric-proximity')?.addEventListener('click', () => displayPointsOnMap(allPointsForMap.filter(p => p.status.type === 'proximity'), true));
-            document.getElementById('metric-overlap')?.addEventListener('click', () => displayPointsOnMap(allPointsForMap.filter(p => p.status.type === 'duplicate'), true));
+            document.getElementById('metric-total')?.addEventListener('click', () => displayPointsOnMap(allPointsForMap_main, true));
+            document.getElementById('metric-proximity')?.addEventListener('click', () => displayPointsOnMap(allPointsForMap_main.filter(p => p.status.type === 'proximity'), true));
+            document.getElementById('metric-overlap')?.addEventListener('click', () => displayPointsOnMap(allPointsForMap_main.filter(p => p.status.type === 'duplicate'), true));
             document.getElementById('metric-removed')?.addEventListener('click', () => {
                  const cleanIds = new Set(cleanPointsForExport.map(p => p.row));
-                 const removedPoints = allPointsForMap.filter(p => !cleanIds.has(p.row));
+                 const removedPoints = allPointsForMap_main.filter(p => !cleanIds.has(p.row));
                  displayPointsOnMap(removedPoints, true);
             });
             document.getElementById('metric-clean')?.addEventListener('click', () => displayPointsOnMap(cleanPointsForExport, true));
@@ -812,19 +1013,17 @@
             const groupIndex = parseInt(card.dataset.groupIndex, 10);
             const groupType = card.dataset.groupType;
             
-            const groupList = groupType === 'proximity' ? proximityGroups : exactDuplicateGroups;
-            const group = groupList[groupIndex];
+            let group;
+            if (groupType === 'proximity') group = proximityGroups[groupIndex];
+            else if (groupType === 'exact') group = exactDuplicateGroups[groupIndex];
+            else if (groupType === 'invalid') group = [invalidCoordinatePoints[groupIndex]];
 
-            if (group) {
-                displayPointsOnMap(group, false);
-            }
+            if (group) displayPointsOnMap(group, false);
         }
 
         function displayPointsOnMap(points, cluster = true) {
-            if (currentFeatureGroup) {
-                map.removeLayer(currentFeatureGroup);
-                currentFeatureGroup = null;
-            }
+            if (currentFeatureGroup) map.removeLayer(currentFeatureGroup);
+            currentFeatureGroup = null;
             markerClusterGroup.clearLayers();
 
             if (!points || points.length === 0) return;
@@ -841,20 +1040,15 @@
 
             const featureGroup = L.featureGroup(markers);
 
-            if (cluster) {
-                markerClusterGroup.addLayer(featureGroup);
-            } else {
+            if (cluster) markerClusterGroup.addLayer(featureGroup);
+            else {
                 currentFeatureGroup = featureGroup;
                 map.addLayer(currentFeatureGroup);
             }
             
             map.fitBounds(featureGroup.getBounds(), { padding: [50, 50], maxZoom: 18 });
         }
-
-        function updateMap(data) {
-            displayPointsOnMap(data, true);
-        }
-
+        
         // --- FUNÇÕES DE UI E UTILITÁRIOS ---
         function setLanguage(lang) {
             currentLang = lang;
@@ -897,25 +1091,6 @@
                 flag.classList.toggle('active', flag.dataset.langCode === lang);
             });
         }
-
-        async function getReverseGeocode(lat, lon) {
-            const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&accept-language=en`;
-            try {
-                const response = await fetch(url);
-                if (!response.ok) return { state: null, city: null };
-                const data = await response.json();
-                if (data.address) {
-                    return {
-                        state: data.address.state,
-                        city: data.address.city || data.address.town || data.address.village
-                    };
-                }
-                return { state: null, city: null };
-            } catch (error) {
-                console.error("Geocoding error:", error);
-                return { state: null, city: null };
-            }
-        }
         
         function showMessage(text, type = 'error') {
             const colors = { error: 'red', success: 'green', info: 'blue' };
@@ -953,18 +1128,27 @@
             cleanPointsForExport = [];
             proximityGroups = [];
             exactDuplicateGroups = [];
-            allPointsForMap = [];
+            allPointsForMap_main = [];
         }
 
         // --- FUNÇÕES DE PARSING E DOWNLOAD ---
-        function parseFile(file) {
+        function parseFile(file) { // Apenas para popular o dropdown
             return new Promise((resolve, reject) => {
                 const reader = new FileReader();
                 reader.onload = (e) => {
                     try {
                         const data = e.target.result;
-                        if (file.name.toLowerCase().endsWith('.xlsx')) resolve(parseXLSX(data));
-                        else resolve(parseCSV(data));
+                        let headers;
+                        if (file.name.toLowerCase().endsWith('.xlsx')) {
+                             const workbook = XLSX.read(data, { type: 'buffer', sheetRows: 1 });
+                             headers = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 })[0];
+                        } else {
+                            const lines = data.trim().split(/\r\n|\n/);
+                            if (lines.length < 1) throw new Error('CSV vazio.');
+                            const delimiter = (lines[0].match(/;/g) || []).length > (lines[0].match(/,/g) || []).length ? ';' : ',';
+                            headers = lines[0].split(delimiter).map(h => h.trim());
+                        }
+                        resolve({ headers });
                     } catch (err) { reject(err); }
                 };
                 reader.onerror = () => reject(new Error('Não foi possível ler o arquivo.'));
@@ -972,57 +1156,7 @@
                 else reader.readAsArrayBuffer(file);
             });
         }
-        function parseXLSX(arrayBuffer) {
-            const workbook = XLSX.read(arrayBuffer, { type: 'buffer' });
-            const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: "" });
-            return processParsedData(jsonData);
-        }
-        function parseCSV(csvText) {
-            const lines = csvText.trim().split(/\r\n|\n/);
-            if (lines.length < 1) throw new Error('CSV vazio.');
-            const delimiter = (lines[0].match(/;/g) || []).length > (lines[0].match(/,/g) || []).length ? ';' : ',';
-            const headers = lines[0].split(delimiter).map(h => h.trim());
-            const jsonData = lines.slice(1).map(line => {
-                const values = line.split(delimiter);
-                return headers.reduce((obj, header, i) => {
-                    obj[header] = values[i] ? values[i].trim() : "";
-                    return obj;
-                }, {});
-            });
-            return processParsedData(jsonData);
-        }
-        function processParsedData(jsonData) {
-            if (jsonData.length === 0) return { headers: [], rows: [] };
-            const headers = Object.keys(jsonData[0]);
-            
-            const findHeader = (possibleNames) => {
-                for (const name of possibleNames) {
-                    const found = headers.find(h => h.trim().toLowerCase() === name);
-                    if (found) return found;
-                }
-                return null;
-            };
-
-            const latHeader = findHeader(['latitude', 'latitude*']);
-            const lonHeader = findHeader(['longitude', 'longitude*']);
-            
-            if (!latHeader || !lonHeader) throw new Error('Colunas "latitude" e "longitude" não encontradas.');
-            
-            const stateHeader = findHeader(['estado', 'uf', 'state*']);
-            const cityHeader = findHeader(['cidade', 'município', 'municipio', 'city*']);
-
-            const rows = jsonData.map((row, index) => {
-                const latStr = String(row[latHeader] || '').replace(',', '.');
-                const lonStr = String(row[lonHeader] || '').replace(',', '.');
-                return {
-                    row: index + 2,
-                    latitude: !isNaN(parseFloat(latStr)) ? parseFloat(latStr) : null,
-                    longitude: !isNaN(parseFloat(lonStr)) ? parseFloat(lonStr) : null,
-                    data: row
-                };
-            });
-            return { headers, rows, rawRows: jsonData, stateHeader, cityHeader };
-        }
+        
         function downloadXLSX(points, fileName) {
             if (points.length === 0) {
                 showMessage(translations[currentLang].download_no_data, 'info');
@@ -1049,3 +1183,4 @@
     </script>
 </body>
 </html>
+
