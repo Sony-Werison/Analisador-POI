@@ -97,12 +97,15 @@
         .dark .results-table th {
              background-color: #374151;
         }
+        #speed-indicator, #rabbit-icon, #turtle-icon {
+            transition: all 0.3s ease-in-out;
+        }
     </style>
 </head>
 <body class="bg-gray-100 dark:bg-gray-900 font-sans p-4 md:p-8">
 
     <div class="max-w-screen-2xl mx-auto">
-        <header class="text-center mb-8">
+        <header class="text-center mb-8 break-words">
             <h1 class="text-3xl md:text-4xl font-bold text-gray-800 dark:text-gray-100" data-lang="main_title">Analisador Avançado de Pontos de Interesse (POIs)</h1>
             <p class="text-gray-600 dark:text-gray-400 mt-2" data-lang="main_subtitle">Carregue um arquivo para validar, analisar sobreposições e visualizar POIs num mapa interativo.</p>
         </header>
@@ -149,7 +152,7 @@
                     </div>
 
                     <div id="column-mapping-section" class="mt-4 p-4 border dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700 hidden">
-                        <h3 class="font-semibold text-gray-700 dark:text-gray-200 mb-3" data-lang="column_mapping_title">Mapeamento de Colunas (Opcional)</h3>
+                        <h3 class="font-semibold text-gray-700 dark:text-gray-200 mb-3" data-lang="column_mapping_title">Mapeamento de Colunas</h3>
                         <div class="grid grid-cols-2 gap-4">
                             <div>
                                 <label for="lat-column-select" class="block text-xs font-medium text-gray-600 dark:text-gray-300" data-lang="latitude_column">Latitude</label>
@@ -170,30 +173,58 @@
                         </div>
                     </div>
 
+                     <fieldset id="analysis-options-section" class="mt-4 p-4 border dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700 hidden">
+                        <legend class="font-semibold text-gray-700 dark:text-gray-200" data-lang="analysis_options_title">Opções de Análise</legend>
+                        <div class="mt-2 space-y-2">
+                            <label class="flex items-center space-x-2 text-sm font-medium text-gray-700 dark:text-gray-300 cursor-pointer">
+                                <input type="checkbox" name="analysis_option" value="invalidData" data-cost="5" class="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500 bg-gray-100 dark:bg-gray-900" checked>
+                                <span data-lang="option_invalid_data">Verificar dados inválidos</span>
+                            </label>
+                            <label class="flex items-center space-x-2 text-sm font-medium text-gray-700 dark:text-gray-300 cursor-pointer">
+                                <input type="checkbox" name="analysis_option" value="exactDuplicates" data-cost="10" class="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500 bg-gray-100 dark:bg-gray-900" checked>
+                                <span data-lang="option_exact_duplicates">Verificar duplicatas exatas</span>
+                            </label>
+                            <label class="flex items-center space-x-2 text-sm font-medium text-gray-700 dark:text-gray-300 cursor-pointer">
+                                <input type="checkbox" name="analysis_option" value="proximity" data-cost="15" class="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500 bg-gray-100 dark:bg-gray-900" checked>
+                                <span data-lang="option_proximity">Verificar pontos em proximidade</span>
+                            </label>
+                             <label class="flex items-center space-x-2 text-sm font-medium text-gray-700 dark:text-gray-300 cursor-pointer">
+                                <input type="checkbox" name="analysis_option" value="geographic" data-cost="60" class="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500 bg-gray-100 dark:bg-gray-900">
+                                <span data-lang="option_geographic">Verificar correspondência geográfica</span>
+                            </label>
+                            <div class="pt-2 border-t dark:border-gray-600">
+                                <label class="flex items-center space-x-2 text-sm font-medium text-gray-700 dark:text-gray-300 cursor-pointer">
+                                    <input type="checkbox" id="load-map-checkbox" data-cost="10" class="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500 bg-gray-100 dark:bg-gray-900" checked>
+                                    <span data-lang="load_map_points">Carregar pontos no mapa</span>
+                                </label>
+                                 <p class="text-xs text-gray-500 dark:text-gray-400 mt-1 ml-6" data-lang="load_map_points_note">(indicado desabilitar para bases muito grandes)</p>
+                            </div>
+                        </div>
+                        <div class="mt-4">
+                            <div class="relative w-full h-8 flex items-center">
+                                <span id="rabbit-icon" class="text-2xl transition-opacity duration-300">🐇</span>
+                                <div class="w-full h-1 bg-gray-200 dark:bg-gray-600 rounded-full mx-2 relative">
+                                    <div id="speed-indicator" class="absolute top-1/2 -translate-y-1/2 h-4 w-4 bg-blue-600 rounded-full border-2 border-white dark:border-gray-800" style="left: 10%;"></div>
+                                </div>
+                                <span id="turtle-icon" class="text-2xl transition-opacity duration-300">🐢</span>
+                            </div>
+                             <div class="flex justify-between text-xs font-medium text-gray-500 dark:text-gray-400 px-1">
+                                <span data-lang="speed_fast">Rápida</span>
+                                <span data-lang="speed_slow">Lenta</span>
+                            </div>
+                        </div>
+                    </fieldset>
+                    
                     <div id="exclusion-column-section" class="mt-4 hidden">
-                         <label for="exclusion-column-select" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" data-lang="tie_breaker_column">2. Coluna para desempate (opcional)</label>
+                         <label for="exclusion-column-select" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" data-lang="tie_breaker_column">Coluna para desempate (opcional)</label>
                          <select id="exclusion-column-select" class="block w-full p-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm">
                              <option value="" data-lang="none_option">Nenhuma</option>
                          </select>
                     </div>
 
-                    <div class="mt-4">
-                        <label class="flex items-center space-x-2 text-sm font-medium text-gray-700 dark:text-gray-300 cursor-pointer">
-                            <input type="checkbox" id="load-map-checkbox" class="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500 bg-gray-100 dark:bg-gray-900" checked>
-                            <span data-lang="load_map_points">Carregar pontos no mapa</span>
-                        </label>
-                         <p class="text-xs text-gray-500 dark:text-gray-400 mt-1 ml-6" data-lang="load_map_points_note">(indicado desabilitar para bases muito grandes)</p>
-                    </div>
-                    <div class="mt-6 grid grid-cols-3 gap-4">
-                        <div class="flex flex-col items-center">
-                            <button id="quick-process-btn" class="w-full bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2 disabled:opacity-50" disabled data-lang="analyze_button_quick">Análise de Duplicidades</button>
-                            <span class="text-xs text-gray-500 dark:text-gray-400 mt-1" data-lang="quick_analysis_note">(mais rápido)</span>
-                        </div>
-                        <div class="flex flex-col items-center">
-                            <button id="full-process-btn" class="w-full bg-indigo-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-indigo-700 flex items-center justify-center gap-2 disabled:opacity-50" disabled data-lang="analyze_button_full">Análise Geográfica</button>
-                             <span class="text-xs text-gray-500 dark:text-gray-400 mt-1" data-lang="full_analysis_note">(mais lento)</span>
-                        </div>
-                        <button id="clear-btn" class="w-full bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200 font-semibold py-2 px-4 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500 self-start" data-lang="clear_button">Limpar</button>
+                    <div class="mt-6 flex gap-4">
+                         <button id="analyze-btn" class="w-2/3 bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2 disabled:opacity-50" disabled data-lang="analyze_button">Analisar</button>
+                         <button id="clear-btn" class="w-1/3 bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200 font-semibold py-2 px-4 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500 self-start" data-lang="clear_button">Limpar</button>
                     </div>
                 </div>
 
@@ -285,11 +316,27 @@
             const rows = jsonData.map((row, index) => {
                 const latStr = String(row[latHeader] || '').replace(',', '.');
                 const lonStr = String(row[lonHeader] || '').replace(',', '.');
+                
+                let latitude = null;
+                let longitude = null;
+                let status = null;
+
+                const isLatNumeric = !isNaN(parseFloat(latStr)) && isFinite(latStr);
+                const isLonNumeric = !isNaN(parseFloat(lonStr)) && isFinite(lonStr);
+
+                if(latStr && isLatNumeric){
+                    latitude = parseFloat(latStr);
+                }
+                 if(lonStr && isLonNumeric){
+                    longitude = parseFloat(lonStr);
+                }
+
                 return {
                     row: index + 2,
-                    latitude: !isNaN(parseFloat(latStr)) ? parseFloat(latStr) : null,
-                    longitude: !isNaN(parseFloat(lonStr)) ? parseFloat(lonStr) : null,
-                    data: row
+                    latitude: latitude,
+                    longitude: longitude,
+                    data: row,
+                    status: status
                 };
             });
             return { headers, rows, stateHeader, cityHeader };
@@ -297,7 +344,7 @@
 
 
         self.onmessage = async (event) => {
-            const { fileContent, fileType, exclusionColumn, isFullAnalysis, loadMapPoints, mappedHeaders } = event.data;
+            const { fileContent, fileType, exclusionColumn, analysisOptions, loadMapPoints, mappedHeaders } = event.data;
             let isGeocodingCancelled = false;
             
             self.onmessage = (e) => {
@@ -332,25 +379,43 @@
             const { rows, headers, stateHeader, cityHeader } = processParsedData(jsonData, mappedHeaders);
             
             // 2. ANÁLISE
-            const validPoints = [];
-            const invalidCoordinatePoints = [];
+            const pointsToAnalyze = [...rows];
+            const invalidDataPoints = [];
             
-            for (const point of rows) {
-                if (point.latitude === null || point.longitude === null) {
-                    point.status = { type: 'invalid', reason: 'Coordenada Inválida/Ausente' };
-                    invalidCoordinatePoints.push(point);
-                } else {
-                    validPoints.push(point);
+            if (analysisOptions.invalidData) {
+                for(let i = pointsToAnalyze.length - 1; i >= 0; i--) {
+                    const p = pointsToAnalyze[i];
+                    const latStr = String(p.data[mappedHeaders.lat] || '').trim();
+                    const lonStr = String(p.data[mappedHeaders.lon] || '').trim();
+                    const stateStr = String(p.data[mappedHeaders.state] || '').trim();
+                    const cityStr = String(p.data[mappedHeaders.city] || '').trim();
+
+                    const isLatNumeric = !isNaN(parseFloat(latStr.replace(',', '.'))) && isFinite(latStr.replace(',', '.'));
+                    const isLonNumeric = !isNaN(parseFloat(lonStr.replace(',', '.'))) && isFinite(lonStr.replace(',', '.'));
+
+                    if (!isLatNumeric || !isLonNumeric) {
+                        p.status = { type: 'invalid', reason: 'Formato de Coordenada Inválido' };
+                        invalidDataPoints.push(...pointsToAnalyze.splice(i, 1));
+                    } else if (analysisOptions.geographic && (!stateStr || !cityStr)) {
+                         p.status = { type: 'invalid', reason: 'Cidade/Estado Ausente' };
+                         invalidDataPoints.push(...pointsToAnalyze.splice(i, 1));
+                    }
                 }
             }
-
-            if (isFullAnalysis) {
-                 if (!stateHeader || !cityHeader) {
+            
+            const cleanPointsForExport = [];
+            const proximityGroups = [];
+            const exactDuplicateGroups = [];
+            const stateMismatches = [];
+            const cityMismatches = [];
+            
+            if (analysisOptions.geographic) {
+                if (!stateHeader || !cityHeader) {
                     self.postMessage({ type: 'error', payload: 'Para a Análise Geográfica, as colunas de Estado e Cidade devem ser mapeadas.' });
                     return;
                 }
                 let geocodedCount = 0;
-                for (const point of validPoints) {
+                for (const point of pointsToAnalyze) {
                     if (isGeocodingCancelled) break;
                     const location = await getReverseGeocode(point.latitude, point.longitude);
                     point.detectedState = location.state;
@@ -363,106 +428,99 @@
                                        (stateMap[providedState.toUpperCase()] && stateMap[providedState.toUpperCase()].toLowerCase() === detectedState.toLowerCase());
 
                     point.cityMatch = (point.data[cityHeader] || '').trim().toLowerCase() === (location.city || '').trim().toLowerCase();
-                    geocodedCount++;
-                    self.postMessage({ type: 'progress', payload: { stage: 'geocoding', current: geocodedCount, total: validPoints.length } });
-                    if(geocodedCount % 10 === 0) await new Promise(resolve => setTimeout(resolve, 1));
-                }
-            }
 
-            const meterSquareGroups = new Map();
-            const resolution = 0.00001;
-            validPoints.forEach(point => {
-                const latRounded = roundHalfToEven(point.latitude / resolution);
-                const lonRounded = roundHalfToEven(point.longitude / resolution);
-                const key = `${latRounded},${lonRounded}`;
-                if (!meterSquareGroups.has(key)) meterSquareGroups.set(key, []);
-                meterSquareGroups.get(key).push(point);
-            });
-
-            const cleanPointsForExport = [];
-            const proximityGroups = [];
-            const exactDuplicateGroups = [];
-            const stateMismatches = [];
-            const cityMismatches = [];
-            
-            const totalGroups = meterSquareGroups.size;
-            let processedGroups = 0;
-
-            meterSquareGroups.forEach(group => {
-                processedGroups++;
-                if (processedGroups % 500 === 0 || processedGroups === totalGroups) {
-                     self.postMessage({ type: 'progress', payload: { stage: 'analysis', current: processedGroups, total: totalGroups } });
-                }
-
-                const subgroups = new Map();
-                group.forEach(p => {
-                    const key = exclusionColumn ? `${p.latitude},${p.longitude},${p.data[exclusionColumn]}` : `${p.latitude},${p.longitude}`;
-                    if (!subgroups.has(key)) subgroups.set(key, []);
-                    subgroups.get(key).push(p);
-                });
-
-                if (group.length === 1) {
-                    const point = group[0];
-                    if (isFullAnalysis) {
-                        if (!point.stateMatch) {
-                            point.status = { type: 'location', reason: 'Estado Incorreto' };
-                            stateMismatches.push(point);
-                        } else if (!point.cityMatch) {
-                            point.status = { type: 'location', reason: 'Cidade Incorreta' };
-                            cityMismatches.push(point);
-                        } else {
-                            point.status = { type: 'clean', reason: 'Ponto Válido' };
-                            cleanPointsForExport.push(point);
-                        }
+                    if (!point.stateMatch) {
+                        point.status = { type: 'location', reason: 'Estado Incorreto' };
+                        stateMismatches.push(point);
+                    } else if (!point.cityMatch) {
+                        point.status = { type: 'location', reason: 'Cidade Incorreta' };
+                        cityMismatches.push(point);
                     } else {
                         point.status = { type: 'clean', reason: 'Ponto Válido' };
                         cleanPointsForExport.push(point);
                     }
-                } else {
-                    if (subgroups.size > 1) {
-                        proximityGroups.push(group);
-                    } else {
-                        exactDuplicateGroups.push(group);
-                    }
-                    
-                    subgroups.forEach(subgroup => {
-                        let problemFound = false;
-                        if (isFullAnalysis) {
-                            for(const p of subgroup) {
-                                if (!p.stateMatch) {
-                                    p.status = { type: 'location', reason: 'Estado Incorreto' };
-                                    if (!stateMismatches.includes(p)) stateMismatches.push(p);
-                                    problemFound = true;
-                                } else if (!p.cityMatch) {
-                                    p.status = { type: 'location', reason: 'Cidade Incorreta' };
-                                    if (!cityMismatches.includes(p)) cityMismatches.push(p);
-                                    problemFound = true;
-                                }
-                            }
-                        }
 
-                        if(!problemFound) {
-                            if (subgroups.size > 1) {
-                                subgroup.forEach(p => p.status = { type: 'proximity', reason: 'Proximidade' });
-                            } else {
-                                subgroup[0].status = { type: 'duplicate', reason: `Duplicata (${subgroup.length - 1} extra)` };
-                                for (let i = 1; i < subgroup.length; i++) {
-                                    subgroup[i].status = { type: 'duplicate', reason: 'Duplicata exata' };
-                                }
-                            }
+                    geocodedCount++;
+                    self.postMessage({ type: 'progress', payload: { stage: 'geocoding', current: geocodedCount, total: pointsToAnalyze.length } });
+                    if(geocodedCount % 10 === 0) await new Promise(resolve => setTimeout(resolve, 1));
+                }
+            }
+            
+            if (analysisOptions.exactDuplicates || analysisOptions.proximity) {
+                const meterSquareGroups = new Map();
+                const resolution = 0.00001;
+                pointsToAnalyze.forEach(point => {
+                    const latRounded = roundHalfToEven(point.latitude / resolution);
+                    const lonRounded = roundHalfToEven(point.longitude / resolution);
+                    const key = `${latRounded},${lonRounded}`;
+                    if (!meterSquareGroups.has(key)) meterSquareGroups.set(key, []);
+                    meterSquareGroups.get(key).push(point);
+                });
+
+                const totalGroups = meterSquareGroups.size;
+                let processedGroups = 0;
+
+                meterSquareGroups.forEach(group => {
+                    processedGroups++;
+                    if (processedGroups % 500 === 0 || processedGroups === totalGroups) {
+                         self.postMessage({ type: 'progress', payload: { stage: 'analysis', current: processedGroups, total: totalGroups } });
+                    }
+
+                    const subgroups = new Map();
+                    group.forEach(p => {
+                        const key = exclusionColumn ? `${p.latitude},${p.longitude},${p.data[exclusionColumn]}` : `${p.latitude},${p.longitude}`;
+                        if (!subgroups.has(key)) subgroups.set(key, []);
+                        subgroups.get(key).push(p);
+                    });
+
+                    if (group.length === 1) {
+                        const point = group[0];
+                        if (!point.status) { // Only mark as clean if no other error was found
+                           point.status = { type: 'clean', reason: 'Ponto Válido' };
+                           cleanPointsForExport.push(point);
+                        }
+                    } else {
+                        if (subgroups.size > 1 && analysisOptions.proximity) {
+                            proximityGroups.push(group);
+                        } else if (subgroups.size === 1 && analysisOptions.exactDuplicates) {
+                            exactDuplicateGroups.push(group);
                         }
                         
-                        cleanPointsForExport.push(subgroup[0]); 
-                    });
-                }
-            });
+                        subgroups.forEach(subgroup => {
+                            let problemFound = false;
+                            if (analysisOptions.geographic) {
+                                for(const p of subgroup) {
+                                    if (p.status?.type === 'location') problemFound = true;
+                                }
+                            }
 
-            const allProblematicPoints = [...invalidCoordinatePoints, ...proximityGroups.flat(), ...exactDuplicateGroups.flat(), ...stateMismatches, ...cityMismatches];
+                            if(!problemFound) {
+                                if (subgroups.size > 1) {
+                                    subgroup.forEach(p => p.status = { type: 'proximity', reason: 'Proximidade' });
+                                } else {
+                                    subgroup[0].status = { type: 'duplicate', reason: `Duplicata (${subgroup.length - 1} extra)` };
+                                    for (let i = 1; i < subgroup.length; i++) {
+                                        subgroup[i].status = { type: 'duplicate', reason: 'Duplicata exata' };
+                                    }
+                                }
+                            }
+                            cleanPointsForExport.push(subgroup[0]); 
+                        });
+                    }
+                });
+            } else if (!analysisOptions.geographic) {
+                 pointsToAnalyze.forEach(p => {
+                    p.status = { type: 'clean', reason: 'Ponto Válido' };
+                    cleanPointsForExport.push(p);
+                 });
+            }
+
+            const allProblematicPoints = [...invalidDataPoints, ...proximityGroups.flat(), ...exactDuplicateGroups.flat(), ...stateMismatches, ...cityMismatches];
             
             const summaryPayload = {
                 metrics: {
                     totalPois: rows.length,
-                    invalidCoordinates: invalidCoordinatePoints.length,
+                    invalidCoordinates: invalidDataPoints.length,
                     poisInProximity: proximityGroups.flat().length,
                     poisInExactOverlap: exactDuplicateGroups.flat().length,
                     stateMismatches: stateMismatches.length,
@@ -471,7 +529,7 @@
                 },
                 proximityGroups,
                 exactDuplicateGroups,
-                invalidCoordinatePoints,
+                invalidCoordinatePoints: invalidDataPoints,
                 stateMismatches,
                 cityMismatches,
                 originalData: { headers, stateHeader, cityHeader }
@@ -499,10 +557,10 @@
         // --- ELEMENTOS DA UI ---
         const fileInput = document.getElementById('file-input');
         const fileNameDisplay = document.getElementById('file-name-display');
-        const quickProcessBtn = document.getElementById('quick-process-btn');
-        const fullProcessBtn = document.getElementById('full-process-btn');
+        const analyzeBtn = document.getElementById('analyze-btn');
         const clearBtn = document.getElementById('clear-btn');
         const exclusionColumnSelect = document.getElementById('exclusion-column-select');
+        const exclusionColumnSection = document.getElementById('exclusion-column-section');
         const columnMappingSection = document.getElementById('column-mapping-section');
         const latColumnSelect = document.getElementById('lat-column-select');
         const lonColumnSelect = document.getElementById('lon-column-select');
@@ -522,6 +580,10 @@
         const themeToggleBtn = document.getElementById('theme-toggle');
         const themeToggleDarkIcon = document.getElementById('theme-toggle-dark-icon');
         const themeToggleLightIcon = document.getElementById('theme-toggle-light-icon');
+        const analysisOptionsCheckboxes = document.querySelectorAll('#analysis-options-section input[type="checkbox"]');
+        const speedIndicator = document.getElementById('speed-indicator');
+        const rabbitIcon = document.getElementById('rabbit-icon');
+        const turtleIcon = document.getElementById('turtle-icon');
 
         // --- ESTADO DA APLICAÇÃO ---
         let originalData = { headers: [] };
@@ -531,7 +593,7 @@
         let exactDuplicateGroups = [];
         let stateMismatches = [];
         let cityMismatches = [];
-        let invalidCoordinatePoints = [];
+        let invalidDataPoints = [];
         let allPointsForMap_main = []; // Para filtragem
         let mapDataQueue = [];
         let isProcessingMapQueue = false;
@@ -567,20 +629,24 @@
                 main_subtitle: "Carregue um arquivo para validar, analisar sobreposições e visualizar POIs num mapa interativo.",
                 control_title: "Controle",
                 select_file: "1. Selecione o arquivo (.xlsx, .csv)",
-                column_mapping_title: "Mapeamento de Colunas (Opcional)",
+                column_mapping_title: "Mapeamento de Colunas",
                 latitude_column: "Latitude",
                 longitude_column: "Longitude",
                 state_column: "Estado/UF",
                 city_column: "Cidade/Município",
-                tie_breaker_column: "2. Coluna para desempate (opcional)",
+                tie_breaker_column: "Coluna para desempate (opcional)",
                 none_option: "Nenhuma",
                 load_map_points: "Carregar pontos no mapa",
                  load_map_points_note: "(indicado desabilitar para bases muito grandes)",
-                analyze_button_quick: "Análise de Duplicidades",
-                quick_analysis_note: "(mais rápido)",
-                analyze_button_full: "Análise Geográfica",
-                full_analysis_note: "(mais lento)",
+                analyze_button: "Analisar",
                 clear_button: "Limpar",
+                analysis_options_title: "Opções de Análise",
+                option_invalid_data: "Verificar dados inválidos",
+                option_exact_duplicates: "Verificar duplicatas exatas",
+                option_proximity: "Verificar pontos em proximidade",
+                option_geographic: "Verificar correspondência geográfica",
+                speed_fast: "Rápida",
+                speed_slow: "Lenta",
                 processing_message: "A processar os dados...",
                 parsing_message: "A ler o ficheiro...",
                 analyzing_message: (current, total) => `Analisando: ${Math.round((current/total)*100)}%`,
@@ -596,7 +662,7 @@
                 total_pois_label: "Total de POIs analisados:",
                 exact_overlap_label: "POIs em sobreposição exata:",
                 proximity_label: "Pontos em Proximidade:",
-                invalid_coords_label: "Coordenadas Inválidas:",
+                invalid_coords_label: "Dados Inválidos:",
                 removed_points_label: "Pontos removidos da base:",
                 clean_points_label: "Pontos na base limpa:",
                 state_mismatch_label: "POIs com Estado incorreto:",
@@ -605,7 +671,7 @@
                 results_title_proximity: "Células com Pontos em Proximidade (Top 100)",
                 results_title_exact: "Grupos de Sobreposição Exata (Top 100)",
                 results_title_mismatch: "Inconsistências de Localização",
-                results_title_invalid: "Coordenadas Inválidas (Top 100)",
+                results_title_invalid: "Dados Inválidos (Top 100)",
                 mismatch_state_header: "Estado Incorreto",
                 mismatch_city_header: "Cidade Incorreta",
                 group_card_header: (count) => `Grupos com ${count} pontos`,
@@ -625,20 +691,24 @@
                 main_subtitle: "Upload a file to validate, analyze overlaps, and visualize POIs on an interactive map.",
                 control_title: "Control",
                 select_file: "1. Select the file (.xlsx, .csv)",
-                column_mapping_title: "Column Mapping (Optional)",
+                column_mapping_title: "Column Mapping",
                 latitude_column: "Latitude",
                 longitude_column: "Longitude",
                 state_column: "State/UF",
                 city_column: "City/Municipality",
-                tie_breaker_column: "2. Tie-breaker column (optional)",
+                tie_breaker_column: "Tie-breaker column (optional)",
                 none_option: "None",
                 load_map_points: "Load points on map",
                 load_map_points_note: "(recommended to disable for very large files)",
-                analyze_button_quick: "Duplicate Analysis",
-                quick_analysis_note: "(faster)",
-                analyze_button_full: "Geographic Analysis",
-                full_analysis_note: "(slower)",
+                analyze_button: "Analyze",
                 clear_button: "Clear",
+                analysis_options_title: "Analysis Options",
+                option_invalid_data: "Check for invalid data",
+                option_exact_duplicates: "Check for exact duplicates",
+                option_proximity: "Check for proximity points",
+                option_geographic: "Check geographic match",
+                speed_fast: "Fast",
+                speed_slow: "Slow",
                 processing_message: "Processing data...",
                 parsing_message: "Reading file...",
                 analyzing_message: (current, total) => `Analyzing: ${Math.round((current/total)*100)}%`,
@@ -654,7 +724,7 @@
                 total_pois_label: "Total POIs analyzed:",
                 exact_overlap_label: "POIs in exact overlap:",
                 proximity_label: "Points in Proximity:",
-                invalid_coords_label: "Invalid Coordinates:",
+                invalid_coords_label: "Invalid Data:",
                 removed_points_label: "Points removed from base:",
                 clean_points_label: "Points in clean base:",
                 state_mismatch_label: "POIs with incorrect State:",
@@ -663,7 +733,7 @@
                 results_title_proximity: "Cells with Proximity Points (Top 100)",
                 results_title_exact: "Exact Overlap Groups (Top 100)",
                 results_title_mismatch: "Location Mismatches",
-                results_title_invalid: "Invalid Coordinates (Top 100)",
+                results_title_invalid: "Invalid Data (Top 100)",
                 mismatch_state_header: "Incorrect State",
                 mismatch_city_header: "Incorrect City",
                 group_card_header: (count) => `Groups with ${count} points`,
@@ -683,20 +753,24 @@
                 main_subtitle: "Cargue un archivo para validar, analizar superposiciones y visualizar POI en un mapa interactivo.",
                 control_title: "Control",
                 select_file: "1. Seleccione el archivo (.xlsx, .csv)",
-                column_mapping_title: "Mapeo de Columnas (Opcional)",
+                column_mapping_title: "Mapeo de Columnas",
                 latitude_column: "Latitud",
                 longitude_column: "Longitud",
                 state_column: "Estado/UF",
                 city_column: "Ciudad/Municipio",
-                tie_breaker_column: "2. Columna de desempate (opcional)",
+                tie_breaker_column: "Columna de desempate (opcional)",
                 none_option: "Ninguna",
                 load_map_points: "Cargar puntos en el mapa",
                 load_map_points_note: "(se recomienda desactivar para bases de datos muy grandes)",
-                analyze_button_quick: "Análisis de Duplicados",
-                quick_analysis_note: "(más rápido)",
-                analyze_button_full: "Análisis Geográfico",
-                full_analysis_note: "(más lento)",
+                analyze_button: "Analizar",
                 clear_button: "Limpiar",
+                analysis_options_title: "Opciones de Análisis",
+                option_invalid_data: "Verificar datos inválidos",
+                option_exact_duplicates: "Verificar duplicados exactos",
+                option_proximity: "Verificar puntos de proximidad",
+                option_geographic: "Verificar coincidencia geográfica",
+                speed_fast: "Rápida",
+                speed_slow: "Lenta",
                 processing_message: "Procesando datos...",
                 parsing_message: "Leyendo el archivo...",
                 analyzing_message: (current, total) => `Analizando: ${Math.round((current/total)*100)}%`,
@@ -712,7 +786,7 @@
                 total_pois_label: "Total de POI analizados:",
                 exact_overlap_label: "POI en superposición exacta:",
                 proximity_label: "Puntos en Proximidad:",
-                invalid_coords_label: "Coordenadas Inválidas:",
+                invalid_coords_label: "Datos Inválidos:",
                 removed_points_label: "Puntos eliminados de la base:",
                 clean_points_label: "Puntos en la base limpia:",
                 state_mismatch_label: "POI con Estado incorrecto:",
@@ -721,7 +795,7 @@
                 results_title_proximity: "Celdas con Puntos en Proximidad (Top 100)",
                 results_title_exact: "Grupos de Superposición Exacta (Top 100)",
                 results_title_mismatch: "Inconsistencias de Ubicación",
-                results_title_invalid: "Coordenadas Inválidas (Top 100)",
+                results_title_invalid: "Datos Inválidos (Top 100)",
                 mismatch_state_header: "Estado Incorrecto",
                 mismatch_city_header: "Ciudad Incorrecta",
                 group_card_header: (count) => `Grupos con ${count} puntos`,
@@ -740,8 +814,7 @@
 
         // --- EVENT LISTENERS ---
         fileInput.addEventListener('change', handleFileSelection);
-        quickProcessBtn.addEventListener('click', () => handleFileProcessing(false));
-        fullProcessBtn.addEventListener('click', () => handleFileProcessing(true));
+        analyzeBtn.addEventListener('click', handleFileProcessing);
         clearBtn.addEventListener('click', clearAll);
         cancelGeocodingBtn.addEventListener('click', () => { 
             if(analysisWorker) analysisWorker.postMessage({ action: 'cancel' });
@@ -754,6 +827,7 @@
         document.querySelectorAll('.lang-flag').forEach(flag => {
             flag.addEventListener('click', (e) => setLanguage(e.currentTarget.dataset.langCode));
         });
+        analysisOptionsCheckboxes.forEach(cb => cb.addEventListener('change', updateSpeedBar));
         
         // --- FUNÇÕES DE INICIALIZAÇÃO ---
         function initializeMap() {
@@ -782,9 +856,9 @@
             clearAnalysisResults(); 
             if (!fileInput.files.length) {
                 fileNameDisplay.textContent = '';
-                quickProcessBtn.disabled = true;
-                fullProcessBtn.disabled = true;
+                analyzeBtn.disabled = true;
                 columnMappingSection.classList.add('hidden');
+                document.getElementById('analysis-options-section').classList.add('hidden');
                 return;
             }
             const file = fileInput.files[0];
@@ -794,23 +868,31 @@
                 const { headers } = await parseFile(file);
                 populateMappingDropdowns(headers);
                 populateExclusionDropdown(headers);
-                quickProcessBtn.disabled = false;
-                fullProcessBtn.disabled = false;
+                analyzeBtn.disabled = false;
+                document.getElementById('analysis-options-section').classList.remove('hidden');
+                updateSpeedBar();
             } catch(e) {
                 showMessage(translations[currentLang].error_reading_file + ' ' + e.message);
             }
         }
 
-        async function handleFileProcessing(isFullAnalysis) {
+        async function handleFileProcessing() {
             clearAnalysisResults();
             if (!fileInput.files.length) {
                 showMessage(translations[currentLang].error_no_data);
                 return;
             }
 
+            const analysisOptions = {
+                invalidData: document.querySelector('input[value="invalidData"]').checked,
+                exactDuplicates: document.querySelector('input[value="exactDuplicates"]').checked,
+                proximity: document.querySelector('input[value="proximity"]').checked,
+                geographic: document.querySelector('input[value="geographic"]').checked,
+            };
+
             loader.classList.remove('hidden');
             loaderText.textContent = translations[currentLang].processing_message;
-            if(isFullAnalysis) cancelGeocodingBtn.classList.remove('hidden');
+            if(analysisOptions.geographic) cancelGeocodingBtn.classList.remove('hidden');
             
             shouldLoadMapPoints = loadMapCheckbox.checked;
 
@@ -829,11 +911,11 @@
                 } else if (type === 'result-summary') {
                     proximityGroups = payload.proximityGroups;
                     exactDuplicateGroups = payload.exactDuplicateGroups;
-                    invalidCoordinatePoints = payload.invalidCoordinatePoints;
+                    invalidDataPoints = payload.invalidCoordinatePoints;
                     stateMismatches = payload.stateMismatches;
                     cityMismatches = payload.cityMismatches;
                     originalData = payload.originalData;
-                    displayResults(payload.metrics, proximityGroups, exactDuplicateGroups, invalidCoordinatePoints, stateMismatches, cityMismatches, isFullAnalysis);
+                    displayResults(payload.metrics, analysisOptions);
                     
                     if (shouldLoadMapPoints) {
                         totalPointsToLoad = payload.metrics.totalPois - payload.metrics.invalidCoordinates;
@@ -890,7 +972,7 @@
                     fileContent: e.target.result,
                     fileType,
                     exclusionColumn: exclusionColumnSelect.value,
-                    isFullAnalysis: isFullAnalysis,
+                    analysisOptions,
                     loadMapPoints: shouldLoadMapPoints,
                     mappedHeaders: {
                         lat: latColumnSelect.value,
@@ -956,24 +1038,33 @@
         }
 
         // --- FUNÇÕES DE EXIBIÇÃO E UI ---
-        function displayResults(metrics, proxGroups, exactGroups, invalidPoints, stateMismatches, cityMismatches, isFullAnalysis) {
+        function displayResults(metrics, analysisOptions) {
             const pontosRemovidos = metrics.totalPois - metrics.cleanPointsCount;
             const pontosRestantes = metrics.cleanPointsCount;
 
-            let fullAnalysisMetrics = '';
-            if (isFullAnalysis) {
-                fullAnalysisMetrics = `
-                    <div class="flex justify-between items-center">
-                        <span class="font-medium" data-lang="state_mismatch_label"></span>
-                        <span id="metric-state-mismatch" class="metric-value font-bold text-lg text-purple-600">${metrics.stateMismatches}</span>
-                    </div>
-                    <div class="flex justify-between items-center">
-                        <span class="font-medium" data-lang="city_mismatch_label"></span>
-                        <span id="metric-city-mismatch" class="metric-value font-bold text-lg text-purple-600">${metrics.cityMismatches}</span>
-                    </div>
-                `;
-            }
-
+            let metricsHtml = `
+                <div class="flex justify-between items-center ${!analysisOptions.invalidData ? 'hidden' : ''}">
+                    <span class="font-medium" data-lang="invalid_coords_label"></span>
+                    <span class="font-bold text-lg text-black dark:text-gray-300">${metrics.invalidCoordinates.toLocaleString('pt-BR')}</span>
+                </div>
+                <div class="flex justify-between items-center ${!analysisOptions.proximity ? 'hidden' : ''}">
+                    <span class="font-medium" data-lang="proximity_label"></span>
+                    <span id="metric-proximity" class="metric-value font-bold text-lg text-yellow-500">${metrics.poisInProximity.toLocaleString('pt-BR')}</span>
+                </div>
+                <div class="flex justify-between items-center ${!analysisOptions.exactDuplicates ? 'hidden' : ''}">
+                    <span class="font-medium" data-lang="exact_overlap_label"></span>
+                    <span id="metric-overlap" class="metric-value font-bold text-lg text-red-600">${metrics.poisInExactOverlap.toLocaleString('pt-BR')}</span>
+                </div>
+                <div class="flex justify-between items-center ${!analysisOptions.geographic ? 'hidden' : ''}">
+                    <span class="font-medium" data-lang="state_mismatch_label"></span>
+                    <span id="metric-state-mismatch" class="metric-value font-bold text-lg text-purple-600">${metrics.stateMismatches}</span>
+                </div>
+                <div class="flex justify-between items-center ${!analysisOptions.geographic ? 'hidden' : ''}">
+                    <span class="font-medium" data-lang="city_mismatch_label"></span>
+                    <span id="metric-city-mismatch" class="metric-value font-bold text-lg text-purple-600">${metrics.cityMismatches}</span>
+                </div>
+            `;
+            
             summarySection.innerHTML = `
                 <h3 class="font-bold text-lg text-gray-800 dark:text-gray-100 mb-3" data-lang="summary_title"></h3>
                 <div class="space-y-3 text-gray-600 dark:text-gray-300 bg-blue-50 dark:bg-gray-700/50 border border-blue-200 dark:border-blue-800 p-4 rounded-lg">
@@ -981,19 +1072,7 @@
                         <span class="font-medium" data-lang="total_pois_label"></span>
                         <span id="metric-total" class="metric-value font-bold text-lg text-gray-800 dark:text-gray-100">${metrics.totalPois.toLocaleString('pt-BR')}</span>
                     </div>
-                    <div class="flex justify-between items-center">
-                        <span class="font-medium" data-lang="invalid_coords_label"></span>
-                        <span class="font-bold text-lg text-black dark:text-gray-300">${metrics.invalidCoordinates.toLocaleString('pt-BR')}</span>
-                    </div>
-                     <div class="flex justify-between items-center">
-                        <span class="font-medium" data-lang="proximity_label"></span>
-                        <span id="metric-proximity" class="metric-value font-bold text-lg text-yellow-500">${metrics.poisInProximity.toLocaleString('pt-BR')}</span>
-                    </div>
-                    <div class="flex justify-between items-center">
-                        <span class="font-medium" data-lang="exact_overlap_label"></span>
-                        <span id="metric-overlap" class="metric-value font-bold text-lg text-red-600">${metrics.poisInExactOverlap.toLocaleString('pt-BR')}</span>
-                    </div>
-                    ${fullAnalysisMetrics}
+                    ${metricsHtml}
                     <div class="flex justify-between items-center pt-2 border-t dark:border-gray-600 mt-2">
                         <span class="font-medium" data-lang="removed_points_label"></span>
                         <span id="metric-removed" class="metric-value font-bold text-lg text-orange-500">${pontosRemovidos.toLocaleString('pt-BR')}</span>
@@ -1006,28 +1085,28 @@
             summarySection.classList.remove('hidden');
 
             const LIMIT = 100;
-            if (invalidPoints.length + proxGroups.length + exactGroups.length + stateMismatches.length + cityMismatches.length > 0) {
+            if (invalidDataPoints.length + proximityGroups.length + exactDuplicateGroups.length + stateMismatches.length + cityMismatches.length > 0) {
                 resultsHeader.classList.remove('hidden');
                 if (shouldLoadMapPoints) showAllBtn.classList.remove('hidden');
                 let resultsHtml = '';
 
-                if (invalidPoints.length > 0) {
+                if (invalidDataPoints.length > 0) {
                     resultsHtml += `<h4 class="font-semibold text-md text-gray-700 dark:text-gray-200 mt-4 mb-2" data-lang="results_title_invalid"></h4>`;
-                    resultsHtml += createCollapsibleSection(invalidPoints.slice(0, LIMIT).map(p => [p]), 'invalid');
+                    resultsHtml += createCollapsibleSection(invalidDataPoints.slice(0, LIMIT).map(p => [p]), 'invalid');
                 }
-
-                if (isFullAnalysis && (stateMismatches.length > 0 || cityMismatches.length > 0)) {
+                
+                if (stateMismatches.length > 0 || cityMismatches.length > 0) {
                      resultsHtml += `<h4 class="font-semibold text-md text-gray-700 dark:text-gray-200 mt-4 mb-2" data-lang="results_title_mismatch"></h4>`;
                      resultsHtml += createMismatchSection(stateMismatches.slice(0, LIMIT), cityMismatches.slice(0, LIMIT));
                 }
 
-                if (exactGroups.length > 0) {
+                if (exactDuplicateGroups.length > 0) {
                     resultsHtml += `<h4 class="font-semibold text-md text-gray-700 dark:text-gray-200 mt-4 mb-2" data-lang="results_title_exact"></h4>`;
-                    resultsHtml += createCollapsibleSection(exactGroups.slice(0, LIMIT), 'exact');
+                    resultsHtml += createCollapsibleSection(exactDuplicateGroups.slice(0, LIMIT), 'exact');
                 }
-                if (proxGroups.length > 0) {
+                if (proximityGroups.length > 0) {
                     resultsHtml += `<h4 class="font-semibold text-md text-gray-700 dark:text-gray-200 mt-4 mb-2" data-lang="results_title_proximity"></h4>`;
-                    resultsHtml += createCollapsibleSection(proxGroups.slice(0, LIMIT), 'proximity');
+                    resultsHtml += createCollapsibleSection(proximityGroups.slice(0, LIMIT), 'proximity');
                 }
                 
                 resultsOutput.innerHTML = resultsHtml;
@@ -1100,7 +1179,7 @@
                         </summary>
                         <div class="p-2 border-t dark:border-gray-600">
                             ${currentGroups.map((group, idx) => {
-                                const groupList = type === 'proximity' ? proximityGroups : (type === 'exact' ? exactDuplicateGroups : invalidCoordinatePoints.map(p=>[p]));
+                                const groupList = type === 'proximity' ? proximityGroups : (type === 'exact' ? exactDuplicateGroups : invalidDataPoints.map(p=>[p]));
                                 const originalIndex = groupList.findIndex(g => g === group);
                                 return createGroupResultCard(group, originalIndex, type);
                             }).join('')}
@@ -1150,7 +1229,7 @@
             let group;
             if (groupType === 'proximity') group = proximityGroups[groupIndex];
             else if (groupType === 'exact') group = exactDuplicateGroups[groupIndex];
-            else if (groupType === 'invalid') group = [invalidCoordinatePoints[groupIndex]];
+            else if (groupType === 'invalid') group = [invalidDataPoints[groupIndex]];
 
             if (group) displayPointsOnMap(group, false);
         }
@@ -1247,16 +1326,31 @@
                 option.textContent = header;
                 exclusionColumnSelect.appendChild(option);
             });
-            exclusionColumnSelect.classList.remove('hidden');
+            exclusionColumnSelect.parentElement.classList.remove('hidden');
+        }
+
+        function updateSpeedBar() {
+            let cost = 0;
+            document.querySelectorAll('#analysis-options-section input[type="checkbox"]').forEach(cb => {
+                if(cb.checked) {
+                    cost += parseInt(cb.dataset.cost, 10);
+                }
+            });
+            
+            const position = Math.max(0, Math.min(100, cost));
+            speedIndicator.style.left = `calc(${position}% - 6px)`;
+
+            rabbitIcon.style.opacity = 1 - (position / 100) * 0.7;
+            turtleIcon.style.opacity = 0.3 + (position / 100) * 0.7;
         }
 
         function clearAll() {
             fileInput.value = '';
             fileNameDisplay.textContent = '';
-            quickProcessBtn.disabled = true;
-            fullProcessBtn.disabled = true;
+            analyzeBtn.disabled = true;
             columnMappingSection.classList.add('hidden');
-            exclusionColumnSelect.classList.add('hidden');
+            document.getElementById('analysis-options-section').classList.add('hidden');
+            exclusionColumnSection.classList.add('hidden');
             clearAnalysisResults();
             initializeMap();
         }
