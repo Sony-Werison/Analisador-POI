@@ -194,10 +194,9 @@
                             </label>
                             <div class="pt-2 border-t dark:border-gray-600">
                                 <label class="flex items-center space-x-2 text-sm font-medium text-gray-700 dark:text-gray-300 cursor-pointer">
-                                    <input type="checkbox" id="load-map-checkbox" data-cost="10" class="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500 bg-gray-100 dark:bg-gray-900" checked>
+                                    <input type="checkbox" id="load-map-checkbox" data-cost="10" name="analysis_option" class="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500 bg-gray-100 dark:bg-gray-900" checked>
                                     <span data-lang="load_map_points">Carregar pontos no mapa</span>
                                 </label>
-                                 <p class="text-xs text-gray-500 dark:text-gray-400 mt-1 ml-6" data-lang="load_map_points_note">(indicado desabilitar para bases muito grandes)</p>
                             </div>
                         </div>
                         <div class="mt-4">
@@ -244,7 +243,7 @@
                     <div id="results-header" class="hidden items-center justify-between mb-4 mt-6 flex-wrap gap-4">
                          <h3 class="text-xl font-bold text-gray-800 dark:text-gray-100" data-lang="downloads_title">Downloads</h3>
                          <div class="grid grid-cols-2 gap-2 w-full">
-                             <button id="download-clean-xlsx-btn" class="bg-green-700 text-white font-semibold py-2 px-3 rounded-lg hover:bg-green-800 text-xs" data-lang="download_clean_button">Base Limpa (XLSX)</button>
+                             <button id="download-full-report-btn" class="bg-green-700 text-white font-semibold py-2 px-3 rounded-lg hover:bg-green-800 text-xs" data-lang="download_full_report_button">Relatório Completo (XLSX)</button>
                              <button id="download-problematic-xlsx-btn" class="bg-red-700 text-white font-semibold py-2 px-3 rounded-lg hover:bg-red-800 text-xs" data-lang="download_problems_button">Problemas (XLSX)</button>
                          </div>
                     </div>
@@ -574,9 +573,8 @@
         const resultsHeader = document.getElementById('results-header');
         const resultsOutput = document.getElementById('results-output');
         const downloadProblematicXlsxBtn = document.getElementById('download-problematic-xlsx-btn');
-        const downloadCleanXlsxBtn = document.getElementById('download-clean-xlsx-btn');
+        const downloadFullReportBtn = document.getElementById('download-full-report-btn');
         const showAllBtn = document.getElementById('show-all-btn');
-        const loadMapCheckbox = document.getElementById('load-map-checkbox');
         const themeToggleBtn = document.getElementById('theme-toggle');
         const themeToggleDarkIcon = document.getElementById('theme-toggle-dark-icon');
         const themeToggleLightIcon = document.getElementById('theme-toggle-light-icon');
@@ -654,7 +652,7 @@
                 map_loading_message: (current, total) => `A carregar pontos: ${current} / ${total}`,
                 cancel_geocoding_button: "Cancelar",
                 downloads_title: "Downloads",
-                download_clean_button: "Base Limpa (XLSX)",
+                download_full_report_button: "Relatório Completo (XLSX)",
                 download_problems_button: "Problemas (XLSX)",
                 map_title: "Visualização no Mapa",
                 show_all_button: "Mostrar Todos",
@@ -716,7 +714,7 @@
                 map_loading_message: (current, total) => `Loading points: ${current} / ${total}`,
                 cancel_geocoding_button: "Cancel",
                 downloads_title: "Downloads",
-                download_clean_button: "Clean Base (XLSX)",
+                download_full_report_button: "Full Report (XLSX)",
                 download_problems_button: "Problems (XLSX)",
                 map_title: "Map Visualization",
                 show_all_button: "Show All",
@@ -778,7 +776,7 @@
                 map_loading_message: (current, total) => `Cargando puntos: ${current} / ${total}`,
                 cancel_geocoding_button: "Cancelar",
                 downloads_title: "Descargas",
-                download_clean_button: "Base Limpia (XLSX)",
+                download_full_report_button: "Informe Completo (XLSX)",
                 download_problems_button: "Problemas (XLSX)",
                 map_title: "Visualización en Mapa",
                 show_all_button: "Mostrar Todos",
@@ -820,7 +818,13 @@
             if(analysisWorker) analysisWorker.postMessage({ action: 'cancel' });
         });
         downloadProblematicXlsxBtn.addEventListener('click', () => downloadXLSX(allProblematicPoints, 'coordenadas_problematicas.xlsx'));
-        downloadCleanXlsxBtn.addEventListener('click', () => downloadXLSX(cleanPointsForExport, 'base_limpa.xlsx'));
+        downloadFullReportBtn.addEventListener('click', () => {
+             if (allPointsForMap_main.length === 0) {
+                showMessage(translations[currentLang].download_no_data, 'info');
+                return;
+            }
+            downloadXLSX(allPointsForMap_main, 'relatorio_completo.xlsx', true)
+        });
         showAllBtn.addEventListener('click', () => {
             displayPointsOnMap(allPointsForMap_main, true);
         });
@@ -1326,7 +1330,7 @@
                 option.textContent = header;
                 exclusionColumnSelect.appendChild(option);
             });
-            exclusionColumnSelect.parentElement.classList.remove('hidden');
+            exclusionColumnSection.parentElement.classList.remove('hidden');
         }
 
         function updateSpeedBar() {
@@ -1338,7 +1342,7 @@
             });
             
             const position = Math.max(0, Math.min(100, cost));
-            speedIndicator.style.left = `calc(${position}% - 6px)`;
+            speedIndicator.style.left = `calc(${position}% - 8px)`;
 
             rabbitIcon.style.opacity = 1 - (position / 100) * 0.7;
             turtleIcon.style.opacity = 0.3 + (position / 100) * 0.7;
@@ -1392,21 +1396,21 @@
             });
         }
         
-        function downloadXLSX(points, fileName) {
+        function downloadXLSX(points, fileName, isFullReport = false) {
             if (points.length === 0) {
                 showMessage(translations[currentLang].download_no_data, 'info');
                 return;
             }
             const dataToExport = points.map(p => {
                 const row = { ...p.data };
-                if (p.status?.reason && fileName.includes('problematicas')) {
-                    row['MOTIVO_PROBLEMA'] = p.status.reason;
-                    if (p.detectedState !== undefined) {
-                        row['Estado_Detectado'] = p.detectedState;
-                    }
-                    if (p.detectedCity !== undefined) {
-                        row['Cidade_Detectada'] = p.detectedCity;
-                    }
+                if (p.status?.reason) {
+                    const statusKey = isFullReport ? 'STATUS_ANALISE' : 'MOTIVO_PROBLEMA';
+                    row[statusKey] = p.status.reason;
+                    
+                    if (p.detectedState !== undefined) row['Estado_Detectado'] = p.detectedState;
+                    if (p.detectedCity !== undefined) row['Cidade_Detectada'] = p.detectedCity;
+                } else if (isFullReport) {
+                    row['STATUS_ANALISE'] = translations[currentLang].map_popup_status_clean;
                 }
                 return row;
             });
